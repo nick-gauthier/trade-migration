@@ -1,6 +1,7 @@
 # Code for "Trade, migration, and the dynamics of spatial interaction"
 
-[![CircleCI](https://circleci.com/gh/nick-gauthier/trade-migration.svg?style=svg)](https://circleci.com/gh/nick-gauthier/trade-migration)  [![Launch Rstudio Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?urlpath=rstudio)
+[![Launch Rstudio Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?urlpath=rstudio)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?filepath=analysis%2Fanalysis.rmd)
 
 This repository contains the working files of data and code for our paper:
 
@@ -13,7 +14,7 @@ The files that produced the published results are also archived at <xxx>
 
 Please cite this compendium using the archival URL (and not a GitHub URL):
 
-> Gauthier, N. and Marwick, B., (2019). *Compendium of R code for ‘Trade, migration, and the dynamics of spatial interaction’*.
+> Gauthier, N., (2019). *Compendium of R code for ‘Trade, migration, and the dynamics of spatial interaction’*.
 > Accessed 15 Nov 2018. Online at <xxx>
 
 ### How to view, run, download
