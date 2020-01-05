@@ -1,4 +1,4 @@
-FROM rocker/geospatial
+FROM rocker/binder:3.6.0
 LABEL maintainer='Nick Gauthier'
 USER root
 COPY . ${HOME}
