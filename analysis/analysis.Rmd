@@ -19,13 +19,6 @@ output:
   base_format: rticles::elsevier_article
 ---
 
-
-```{r echo = FALSE, eval = FALSE, cache=TRUE}
-# Install necessary packages if not already available (not run by default)
-install.packages(c('tidyverse', 'tidygraph', 'furrr', 'gratia', 'patchwork', 'gganimate'))
-#bookdown and rticles too?
-```
-
 ```{r setup, include=FALSE, mesage = FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = TRUE)
 
@@ -36,8 +29,6 @@ library(sf)
 library(gganimate)
 library(patchwork)
 library(furrr)
-library(mgcv)
-library(gratia)
 ```
 
 # Introduction
@@ -120,7 +111,8 @@ food_start <- 200
 ```
 
 ```{r settlement_setup}
-hinterlands <- c(40,-69, -40,-69,-80,0,-40,70,40,69,80,0,40,-69) %>% # changing one 69 in the top corner to a 70 helps for some reason
+hinterlands <- c(40, -69, -40, -69, -80, 0, 
+                 -40, 70, 40, 69, 80, 0, 40, -69) %>% # changing one 69 in the top corner to a 70 helps for some reason
   matrix(nrow = 7, byrow = 2) %>%
   list %>%
   st_polygon %>%
@@ -463,7 +455,6 @@ In the first scenario with only population-based migration, there are nonlinear 
 
 ```{r beta2alpha1, fig.cap='Interaction between the distance deterrence for migrants ($\\beta_2$, columns) and the returns to attractiveness for population size ($\\alpha_1$, rows), when the moving food to settlements is difficult and migrants make decisions based only on settlement population size ($\\beta_1 = 5$ and $\\alpha_2 = 0$).'}
 node_dat %>%
- # filter(beta1 == 5, beta2 == 15, nu == 0.05) %>%
     filter(beta1 == 5, alpha2 == 0, m_max == 0.05) %>%
   group_by(alpha1, beta2)%>%
   arrange(population) %>%

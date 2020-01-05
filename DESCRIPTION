@@ -1,0 +1,27 @@
+Type: Compendium
+Package: trade-migration
+Title: R Code for "Trade, Migration, and the Dynamics of Spatial Interaction"
+Version: 0.0.1
+Authors@R: 
+    person(given = "Nicolas",
+           family = "Gauthier",
+           role = c("aut", "cre"),
+           email = "ngauthier@email.arizona.edu",
+           comment = c(ORCID = "https://orcid.org/0000-0002-2225-5827
+"))
+Description: Compendium description
+License: What license it uses
+Depends: 
+    bookdown,
+    furrr,
+    gganimate,
+    ggraph,
+    igraph,
+    knitr,
+    patchwork,
+    rmarkdown,
+    sf,
+    tidygraph,
+    tidyverse
+Encoding: UTF-8
+LazyData: true
