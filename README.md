@@ -1,5 +1,8 @@
 # Code for "Trade, migration, and the dynamics of spatial interaction"
 
+[![DOI](https://zenodo.org/badge/231979414.svg)](https://zenodo.org/badge/latestdoi/231979414)
+
+
 [![Launch Rstudio Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?urlpath=rstudio)
 
 This repository contains the working files of data and code for our paper:
@@ -7,14 +10,14 @@ This repository contains the working files of data and code for our paper:
 > Gauthier, N. (2019). *Trade, migration, and the dynamics of spatial interaction*. SocArXiv
 > <https://doi.org/10.31235/osf.io/trbf8>
 
-The files that produced the published results are also archived at <xxx>
+The files that produced the published results are also archived at <https://doi.org/10.5281/zenodo.3598130>
 
 ### How to cite
 
 Please cite this compendium using the archival URL (and not a GitHub URL):
 
 > Gauthier, N., (2019). *Compendium of R code for ‘Trade, migration, and the dynamics of spatial interaction’*.
-> Accessed 15 Nov 2018. Online at <xxx>
+> Accessed 15 Nov 2018. Online at <https://doi.org/10.5281/zenodo.3598130>
 
 ### How to view, run, download
 
