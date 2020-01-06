@@ -1,7 +1,6 @@
 # Code for "Trade, migration, and the dynamics of spatial interaction"
 
 [![Launch Rstudio Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?urlpath=rstudio)
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/nick-gauthier/trade-migration/master?filepath=analysis%2Fanalysis.rmd)
 
 This repository contains the working files of data and code for our paper:
 
