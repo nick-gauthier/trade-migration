@@ -10,7 +10,7 @@ address:
     address: School of Human Evolution and Social Change, S. Caddy Mall, Tempe, AZ
 abstract: Archaeological settlement patterns are the physical remains of complex webs of human decision-making and social interaction. Entropy-maximizing spatial interaction models are a means of building parsimonious models that average over much of this small-scale complexity, while maintaining key large-scale structural features. Dynamic social interaction models extend this approach by allowing archaeologists to explore the coevolution of human settlement systems and the networks of interaction that drive them. Yet, such models are often imprecise, relying on generalized notions of settlement "influence" and "attractiveness" rather than concrete material flows of goods and people. Here, I present a disaggregated spatial interaction model that explicitly resolves trade and migration flows and their combined influence on settlement growth and decline. I explore how the balance of costs and benefits of each type of interaction influence long-term settlement patterns. I find trade flows are the strongest determinant of equilibrium settlement structure, and that migration flows play a more transient role in balancing site hierarchies. This model illustrates how the broad toolkit for spatial interaction modeling developed in geography and economics can aid the precision of quantitative theory building in archaeology, and provides a roadmap for connecting mechanistic models to the empirical archaeological record.
 
-journal: "Journal of Anthropological Archaeology"
+journal: "Journal of Archaeological Science"
 date: "`r Sys.Date()`"
 bibliography: references.bib  
 biblio-style: "authoryear"
@@ -147,9 +147,9 @@ prune <- function(net, beta, tolerance = 0.001){
     filter(distance < -log(tolerance) * beta)
 }
   
-# the larger your domain grows the more potential connections there will be, which can
+# The larger your domain grows the more potential connections there will be, which can
 # increase computational costs significantly. We can fix this by filtering out edges defined
-# at a certain threshold. if we're using the exponetial beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. so at a maximum parameterization of beta = 20, truncating the network at this distance serves to elimitate flows that will be lses than .5% or 1 food.
+# at a certain threshold. If we're using the exponential beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. So at a maximum parameterization of beta = 20, truncating the network at this distance serves to eliminate flows that will be less than .5% or 1 food.
 
 paths <- settlements %E>% 
   filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
@@ -255,7 +255,7 @@ migrate <- function(net, alpha1, alpha2, beta, nu = .05){
 }
 ```
 
-In summary, the flow of resources from each hinterland to each settlement is determined by Equation \@ref(eq:trade), which depends on the underlying distribution of resources and settlement populations. Then, the flow of migrants between settlements is determined by Equation \@ref(eq:migration), based on the settlement populations and the flow of resources. Finally, the populations of the settlements grow both by consuming trade resources and by accepting new migrants according to Equation \@ref(eq:growth), and theis new population distribution will feed back to influence future trade and migrant flows. The entire system is complicated web of nonlinear interaction, as the growth and decline of settlements can potentially depend on all other settlements. The complexity of this system increases geometrically as the number of settlements increases, precluding exact analytic solutions. We must instead leverage numerical simulations to capture these complex interactions computationally.
+In summary, the flow of resources from each hinterland to each settlement is determined by Equation \@ref(eq:trade), which depends on the underlying distribution of resources and settlement populations. Then, the flow of migrants between settlements is determined by Equation \@ref(eq:migration), based on the settlement populations and the flow of resources. Finally, the populations of the settlements grow both by consuming trade resources and by accepting new migrants according to Equation \@ref(eq:growth), and this new population distribution will feed back to influence future trade and migrant flows. The entire system is complicated web of nonlinear interaction, as the growth and decline of settlements can potentially depend on all other settlements. The complexity of this system increases geometrically as the number of settlements increases, precluding exact analytic solutions. We must instead leverage numerical simulations to capture these complex interactions computationally.
 
 ```{r}
 run_sim <- function(net, alpha1 = 1.15, alpha2 = 1, beta1 = 5, beta2 = 10, nu = .05){
@@ -325,10 +325,10 @@ edge_dat <- param_sweep %>%
   mutate(edges = map(sim, ~activate(., 'edges') %>% filter(trade_flow > 1 | migrant_flow > 1) %>% as_tibble)) %>%
   select(beta1:m_max, edges)
 
-saveRDS(nd_graphs, 'nd_graphs')
-saveRDS(param_dat, 'param_dat')
-saveRDS(node_dat, 'node_dat')
-saveRDS(edge_dat, 'edge_dat')
+saveRDS(nd_graphs, 'derived-data/nd_graphs')
+saveRDS(param_dat, 'derived-data/param_dat')
+saveRDS(node_dat, 'derived-data/node_dat')
+saveRDS(edge_dat, 'derived-data/edge_dat')
 ```
 
 # Analysis
@@ -348,10 +348,10 @@ $\beta_2$              [5, 10, 15, 20]            Distance deterrence of migrati
 Table:  Parameters, their default values, and ranges explored.
 
 ```{r}
-nd_graphs <- readRDS('nd_graphs')
-param_dat <- readRDS('param_dat')
-node_dat <- readRDS('node_dat')
-edge_dat <- readRDS('edge_dat')
+nd_graphs <- readRDS('derived-data/nd_graphs')
+param_dat <- readRDS('derived-data/param_dat')
+node_dat <- readRDS('derived-data/node_dat')
+edge_dat <- readRDS('derived-data/edge_dat')
 ```
 
 ## The movement of food to people defines settlement territory size, migration costs mediate the distribution of population

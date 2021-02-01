@@ -1,0 +1,281 @@
+---
+title: "Khabur"
+author: "Nick Gauthier"
+date: "12/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gdistance)
+library(tidyverse)
+library(stars)
+library(tidygraph)
+library(sfnetworks)
+```
+
+```{r}
+mounds <- read.csv('analysis/menze-ur_khabur_sites-data.csv') %>%
+  rename(lat = latitude..UTM., lon = longitude..UTM., size = total.volume..m.m.m.) %>%
+  mutate(size = as.numeric(size)) %>%
+  st_as_sf(coords = c('lon', 'lat'), crs = 32637) # UTM Zone 37N 
+
+ggplot(mounds) +
+  geom_histogram(aes(size)) + 
+  scale_x_log10()
+
+ggplot(mounds) +
+  geom_sf(aes(size = size), alpha = .5) +
+  scale_size_area(name = 'Site volume') +
+  theme_bw()
+
+```
+
+
+```{r}
+hex <- st_bbox(mounds) %>%
+    st_make_grid(cellsize = 2500 * sqrt(3), square = FALSE, flat_topped = TRUE) %>% # st_make_grid wants the short diagonal
+    st_sf() %>%
+  mutate(id = 1:n())
+
+hex_geo <- st_transform(hex, crs = 4326)
+```
+
+
+```{r}
+ggplot(hex) +
+  geom_sf(color = 'lightgrey') +
+  geom_sf(data = mounds, aes(size = size), alpha = .5) +
+  scale_size_area() +
+  theme_bw()
+```
+
+
+
+
+```{r}
+volume <- st_join(mounds, hex, join = st_within) %>%
+  as_tibble() %>%
+  group_by(id) %>%
+  summarize(count = n(), volume = sum(size,  na.rm = TRUE)) %>%
+  left_join(hex, .) %>%
+  replace_na(list(count = 0, volume = 0))
+```
+
+```{r}
+ggplot(volume) +
+  geom_sf(aes(fill = volume)) +
+  scale_fill_viridis_c() +
+  theme_minimal()
+
+ggplot(volume) +
+  geom_sf(aes(fill = count)) +
+  scale_fill_viridis_c() +
+  theme_minimal()
+```
+
+```{r}
+ggplot(volume, aes(volume, count)) +
+  geom_point()
+```
+
+
+```{r, message = FALSE}
+npp <- read_stars(c('../urban-persistence/CHELSA_bio10_01.tif', 
+                    '../urban-persistence/CHELSA_bio10_12.tif')) %>% 
+  setNames(c('temperature', 'precipitation')) %>%
+  mutate(temperature = temperature / 10, # temperature is in degrees C * 10
+         ### the miami model
+         npp_prec = 3000 * (1 - exp(-0.000664 * precipitation)),
+         npp_temp = 3000 / (1 + exp(1.315 - 0.119 * temperature)),
+         npp = pmin(npp_prec, npp_temp)) %>%
+  st_crop(hex_geo) %>%
+  st_as_stars() %>%
+  select(precipitation, npp)
+
+elev <- st_mosaic(read_stars('analysis/EarthEnv-DEM90_N35E035.bil') , 
+                  read_stars('analysis/EarthEnv-DEM90_N35E040.bil')) %>%
+  st_crop(hex_geo)
+```
+
+```{r}
+elev %>% 
+  aggregate(hex_geo, mean, na.rm = TRUE) %>%
+  st_transform(hex) %>%
+  st_as_sf() %>% 
+  plot
+```
+
+```{r}
+altDiff <- function(x){x[2] - x[1]}
+hd <- transition(as(elev, 'Raster'), altDiff, 8, symm=FALSE)
+slope <- geoCorrection(hd, type = 'c')
+```
+
+```{r, message = FALSE}
+
+env <- aggregate(npp, hex_geo, mean, na.rm = TRUE) %>%
+  st_transform(hex) %>%
+  st_as_sf()
+
+arable <- elev %>%
+  as('Raster') %>%
+  raster::terrain(unit = 'degrees') %>%
+  st_as_stars() %>%
+  aggregate(hex_geo, FUN = function(x) sum(x <= 2.5, na.rm = TRUE) / length(x)) %>%
+  st_transform(hex) %>% 
+  st_as_sf()
+
+dat <- st_join(arable, env, join = st_equals) %>% 
+  mutate(food = npp * slope)
+```
+
+```{r}
+plot(dat)
+```
+
+```{r}
+pts <- st_as_sf(dat) %>% st_centroid()
+
+settlements <- pts %>%
+  st_distance() %>%
+  units::set_units('km') %>%
+  units::drop_units() %>% 
+  replace(. == 0, 99999) %>%
+  as_tbl_graph %>%
+  mutate(id = 1:n(),
+         population = 25,
+         food = 200,
+         x = st_coordinates(pts)[,1], 
+         y = st_coordinates(pts)[,2],
+         eq = 0) %E>%
+  rename(distance = weight) %>%
+  mutate(distance = if_else(distance == 99999, 0, distance),
+         trade_flow = 0,
+         migrant_flow = 0) 
+
+prune <- function(net, beta, tolerance = 0.001){
+  net %E>%
+    filter(distance < -log(tolerance) * beta)
+}
+  
+# The larger your domain grows the more potential connections there will be, which can
+# increase computational costs significantly. We can fix this by filtering out edges defined
+# at a certain threshold. If we're using the exponential beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. So at a maximum parameterization of beta = 20, truncating the network at this distance serves to eliminate flows that will be less than .5% or 1 food.
+
+paths <- settlements %E>% 
+  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
+  igraph::as.undirected() %>%
+  as_tbl_graph()
+```
+
+```{r}
+sfnetwork(hex %>% st_centroid, st_touches(hex) %>% as.data.frame()) %>% plot
+
+test <- sfnetwork(hex %>% st_centroid, as_tibble(settlements)) %N>%
+    mutate(id = 1:n(),
+           # this starts it off at local carrying capacity
+           population = dat$food,
+         food = dat$food,
+         x = st_coordinates(pts)[,1], 
+         y = st_coordinates(pts)[,2],
+         eq = 0)
+
+```
+
+```{r}
+test2 <- reduce(1:25, run_sim, beta2 = 1, beta1 = .05, .init = test)
+
+test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_color_viridis_c()
+test2
+
+run_sim(test)
+
+test2 %>%
+  nystuen_dacey()%>% plot
+```
+
+```{r}
+volume %>%
+  mutate(npp = env$npp,
+         prec = env$precipitation,
+         res = res$resources) %>%
+  ggplot(aes(npp, volume)) + geom_point()
+
+volume %>%
+  mutate(npp = env$npp,
+         prec = env$precipitation,
+         res = res$resources) %>%
+  ggplot(aes(prec, volume)) + geom_point()
+
+volume %>%
+  mutate(npp = env$npp,
+         prec = env$precipitation,
+         res = res$resources) %>%
+  ggplot(aes(res, volume)) + geom_point()
+
+
+volume %>%
+  mutate(npp = env$npp,
+         prec = env$precipitation,
+         res = res$resources) %>%
+  ggplot(aes(prec, npp)) + geom_point()
+```
+
+```{r}
+swsn <- readRDS('../Southwest/output/swsn')
+distances <- read_csv('../Southwest/output/distances.csv', col_types = 'ccd') 
+swsn %E>%
+  as_tibble %>%
+  filter(time == 1200)
+```
+
+```{r}
+swsn2 <- swsn %E>%
+  # for each edge, get the name of the from and to nodes
+  mutate(from_patch = .N()$name[from],
+         to_patch = .N()$name[to]) %>%
+  # combine with the least-cost distances
+  left_join(distances, by = c('from_patch', 'to_patch')) %>%
+  # remove redundant edges
+  mutate(from_tmp = pmin(from, to), to_tmp = pmax(from, to)) %>%
+  group_by(from_tmp, to_tmp, time) %>%
+  sample_n(1) %>%
+  ungroup %>%
+  select(-from_tmp, -to_tmp) %>%
+  convert(to_undirected)
+```
+
+Convert the network edgelist into a tibble for modeling.
+
+```{r}
+dat <- swsn2 %E>%
+  as_tibble %>%
+  mutate(JSD = if_else(JSD > .999, .999, JSD)) %>%
+  mutate(from = as.factor(from), 
+         to = as.factor(to), 
+         time_fact = as.factor(time)) %>%
+  filter(JSD >= .001)
+```
+
+```{r}
+test3 <- dat %>%
+  filter(time == 1200)
+hist(qlogis(test3$JSD))
+library(nlme)
+library(corMLPE)
+m1 <- gls(qlogis(JSD) ~ distance, correlation = corMLPE(form = ~from + to), data = test3)
+m2 <- gls(qlogis(JSD) ~ log(distance), correlation = corMLPE(form = ~from + to), data = test3)
+m3 <- gls(qlogis(JSD) ~ distance + log(distance), correlation = corMLPE(form = ~from + to), data = test3)
+m4 <- mgcv::gamm(qlogis(JSD) ~ s(distance), correlation = corMLPE(form = ~from + to), data = test3)
+m3
+plot(m4$gam)
+
+AIC(m1, m2, m3, m4$lme)
+```
+
+```{r}
+plot(1:50, exp(-0.045 * 1:50))
+plot(1:50, (1:50)^-1.99)
+plot(1:50, exp(-0.012 * 1:50)*(1:50)^-1.55)
+```
