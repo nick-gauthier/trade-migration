@@ -33,8 +33,9 @@ ggplot(mounds) +
 
 
 ```{r}
+radius_khabur <- 2500
 hex <- st_bbox(mounds) %>%
-    st_make_grid(cellsize = 2500 * sqrt(3), square = FALSE, flat_topped = TRUE) %>% # st_make_grid wants the short diagonal
+    st_make_grid(cellsize = radius_khabur * sqrt(3), square = FALSE, flat_topped = TRUE) %>% # st_make_grid wants the short diagonal
     st_sf() %>%
   mutate(id = 1:n())
 
@@ -58,7 +59,7 @@ volume <- st_join(mounds, hex, join = st_within) %>%
   as_tibble() %>%
   group_by(id) %>%
   summarize(count = n(), volume = sum(size,  na.rm = TRUE)) %>%
-  left_join(hex, .) %>%
+  left_join(hex, ., by = 'id') %>%
   replace_na(list(count = 0, volume = 0))
 ```
 
@@ -89,14 +90,14 @@ npp <- read_stars(c('../urban-persistence/CHELSA_bio10_01.tif',
          npp_prec = 3000 * (1 - exp(-0.000664 * precipitation)),
          npp_temp = 3000 / (1 + exp(1.315 - 0.119 * temperature)),
          npp = pmin(npp_prec, npp_temp)) %>%
-  st_crop(hex_geo) %>%
-  st_as_stars() %>%
-  select(precipitation, npp)
+  select(precipitation, npp) %>%
+  st_crop(hex_geo)
 
 elev <- st_mosaic(read_stars('analysis/EarthEnv-DEM90_N35E035.bil') , 
                   read_stars('analysis/EarthEnv-DEM90_N35E040.bil')) %>%
   st_crop(hex_geo)
 ```
+
 
 ```{r}
 elev %>% 
@@ -113,7 +114,6 @@ slope <- geoCorrection(hd, type = 'c')
 ```
 
 ```{r, message = FALSE}
-
 env <- aggregate(npp, hex_geo, mean, na.rm = TRUE) %>%
   st_transform(hex) %>%
   st_as_sf()
@@ -152,48 +152,102 @@ settlements <- pts %>%
   rename(distance = weight) %>%
   mutate(distance = if_else(distance == 99999, 0, distance),
          trade_flow = 0,
-         migrant_flow = 0) 
-
-prune <- function(net, beta, tolerance = 0.001){
-  net %E>%
-    filter(distance < -log(tolerance) * beta)
-}
-  
-# The larger your domain grows the more potential connections there will be, which can
-# increase computational costs significantly. We can fix this by filtering out edges defined
-# at a certain threshold. If we're using the exponential beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. So at a maximum parameterization of beta = 20, truncating the network at this distance serves to eliminate flows that will be less than .5% or 1 food.
-
-paths <- settlements %E>% 
-  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
-  igraph::as.undirected() %>%
-  as_tbl_graph()
+         migrant_flow = 0)
 ```
 
 ```{r}
-sfnetwork(hex %>% st_centroid, st_touches(hex) %>% as.data.frame()) %>% plot
-
-test <- sfnetwork(hex %>% st_centroid, as_tibble(settlements)) %N>%
+khabur <- sfnetwork(hex %>% st_centroid, as_tibble(settlements)) %N>%
     mutate(id = 1:n(),
            # this starts it off at local carrying capacity
            population = dat$food,
          food = dat$food,
          x = st_coordinates(pts)[,1], 
          y = st_coordinates(pts)[,2],
-         eq = 0)
-
+         eq = 0) %>%
+        filter(food > 0)# fixes cell 182
 ```
 
 ```{r}
-test2 <- reduce(1:25, run_sim, beta2 = 1, beta1 = .05, .init = test)
+ggplot(st_as_sf(dat)) +
+  geom_sf() +
+  geom_sf(data = st_as_sf(dat)[182,], color = 'red')
+```
+```{r}
+plot(khabur)
+```
 
-test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_color_viridis_c()
+
+```{r}
+radius <- 2.5 # radius is required in the trade code, should generalize
+
+test2 <- reduce(1:50, run_sim, beta1 = 5, beta2 = .01, .init = khabur)
+
+test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_fill_viridis_c()
 test2
 
-run_sim(test)
+run_sim(khabur)
+migrate
 
 test2 %>%
-  nystuen_dacey()%>% plot
+  nystuen_dacey() %>% plot
+
+test2 %>%
+  nystuen_dacey(mode = 'migration') %>% plot
 ```
+
+```{r}
+as_tibble(test2) %>% bind_cols(as_tibble(volume) %>% filter(id!=182)) %>%
+  summary
+#  bind_cols(as_tibble(env)) %>%
+ # filter(population<2000) %>%
+  ggplot(aes(count, population)) +
+  geom_point()
+```
+```{r}
+test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_fill_viridis_c()
+
+rivers <- read_sf('~/Downloads/KhaburModeling-1/data/Waterway_Data/rivers.shp') 
+hollowways <- read_sf('~/Downloads/KhaburModeling-1/data/AncientRoads/hollowways.shp') 
+mb_sites <- read_sf('~/Downloads/KhaburModeling-1/data/MB-sites_Jazira/MB_costmatrix.shp')
+plot(rivers)
+ggplot(mb_sites) +
+  geom_sf() +
+    geom_sf_label(data = filter(mb_sites, Size__ha_ >= 30), aes(label = Site_name))
+```
+```{r}
+plot(env)
+
+env %>%
+  mutate(river = if_else(lengths(st_intersects(geometry, rivers)) > 0, TRUE, FALSE),
+         sites) %>%
+  plot
+
+env %>% mutate(river = if_else(lengths(st_intersects(geometry, mb_sites)) > 0, TRUE, FALSE)) %>%
+  plot
+```
+
+```{r}
+st_join(mb_sites, hex, join = st_within) %>%
+  as_tibble() %>%
+  group_by(id) %>%
+  summarize(count = n(), size = sum(Size__ha_,  na.rm = TRUE)) %>%
+  left_join(hex, ., by = 'id') %>%
+  mutate(npp = env$npp, )
+  replace_na(list(count = 0, size = 0)) %>%
+  plot
+  
+  env
+```
+```{r}
+plot(volume %>% filter(volume > 1000000))
+```
+```{r}
+ggplot() +
+  geom_sf(data = env) +
+  geom_sf(data = mb_sites) #+
+   # geom_sf_label(data = filter(mb_sites, Size__ha_ >= 30), aes(label = Site_name))
+```
+
 
 ```{r}
 volume %>%
