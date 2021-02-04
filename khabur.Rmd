@@ -12,6 +12,9 @@ library(tidyverse)
 library(stars)
 library(tidygraph)
 library(sfnetworks)
+library(exactextractr)
+#install.packages('~/Projects/tyche_0.1.0.tar.gz', repos = NULL, type = 'source')
+library(tyche)
 ```
 
 ```{r}
@@ -20,6 +23,125 @@ mounds <- read.csv('analysis/menze-ur_khabur_sites-data.csv') %>%
   mutate(size = as.numeric(size)) %>%
   st_as_sf(coords = c('lon', 'lat'), crs = 32637) # UTM Zone 37N 
 
+mb_sites <- read_sf('~/Downloads/KhaburModeling-1/data/MB-sites_Jazira/MB_costmatrix.shp')
+```
+```{r}
+rivers <- read_sf('~/Downloads/RIMES_river/RIMES_Flüsse.shp')   %>% 
+  st_crop(hex_geo) %>%
+  st_transform(st_crs(hex))
+
+ne_rivers <- read_sf('~/Downloads/ne_10m_rivers_europe/ne_10m_rivers_europe.shp') %>% 
+  st_crop(hex_geo)
+
+plot(rivers)
+
+env %>%
+  mutate(river = if_else(lengths(st_intersects(geometry, rivers)) > 0, TRUE, FALSE)) %>%
+  mutate(river2 = if_else(lengths(st_crosses(geometry, rivers)) > 0, TRUE, FALSE)) %>%
+    plot
+```
+
+```{r}
+flo5k <- brick('~/Downloads/FLO1K/FLO1K.5min.ts.1960.2015.qav.nc') %>% 
+  crop(extent(st_bbox(hex_geo))) %>%
+  mean()
+
+#%>% exact_extract(hex_geo, 'mean') #%>% plot#log %>% plot
+
+env %>% mutate(test = log(flo5k)) %>% plot
+
+
+
+plot(rivers)
+
+so_hires <- read_stars('~/Downloads/EU/SO.tif') %>% 
+  st_crop(hex_geo) %>% 
+  st_as_stars() #%>% aggregate(hex_geo, max, na.rm = TRUE)
+plot(so_hires)
+
+eu_streams <- read_sf('~/Downloads/eu_streams/eu_streams.shp') %>% 
+  st_crop(hex_geo)
+plot(eu_streams)
+
+hydrorivers_hires <- read_sf('~/Downloads/HydroRIVERS_v10_eu_shp/HydroRIVERS_v10_eu_shp/HydroRIVERS_v10_eu.shp') %>% st_crop(hex_geo) %>% select(-c(NEXT_DOWN, MAIN_RIV, LENGTH_KM, DIST_DN_KM, DIST_UP_KM, ENDORHEIC))
+
+plot(hydrorivers_hires)
+
+hydrorivers_hires %>% select(-HYRIV_ID, -HYBAS_L12) %>% plot
+```
+
+
+```{r}
+test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_fill_viridis_c()
+
+
+plot(rivers)
+ggplot(mb_sites) +
+  geom_sf() +
+    geom_sf_label(data = filter(mb_sites, Size__ha_ >= 30), aes(label = Site_name))
+```
+```{r}
+plot(env)
+
+env %>%
+  mutate(river = if_else(lengths(st_intersects(geometry, rivers)) > 0, TRUE, FALSE)) %>%
+  plot
+
+env %>% mutate(river = if_else(lengths(st_intersects(geometry, mb_sites)) > 0, TRUE, FALSE)) %>%
+  plot
+```
+```{r}
+flow <- brick('~/Downloads/flow_acc.nc') %>%
+  crop(extent(st_bbox(hex_geo))) %>%
+  sum() %>%
+  st_as_stars() %>%
+  st_set_crs(4326)
+
+plot(flow)
+test <- st_transform(hex_geo, st_crs(flow)) %>% st_crop(flow, .) %>%
+  st_dim_to_attr() %>%
+  st_as_stars()
+test %>% plot
+
+flow2 <- brick('~/Downloads/flow_acc.nc')
+flow2 %>% plot
+st_crs(flow);st_crs(hex_geo)
+flow  %>% plot
+st_crop(hex_geo)
+
+
+read_stars('~/Downloads/hydroclim_average+sum.nc') %>% st_set_crs(4326)  %>% plot
+
+test <- brick('~/Downloads/hydroclim_average+sum.nc', varname = 'hydro_avg') %>%
+  crop(extent(st_bbox(hex_geo))) %>%
+  sum() %>%
+  st_as_stars() %>%
+  st_set_crs(4326) %>% 
+  aggregate(hex_geo, max, na.rm = TRUE) %>%
+  st_transform(hex) %>%
+  st_as_sf() %>%
+  mutate(layer = replace_na(layer, 0),
+         layer = if_else(is.infinite(layer), 0, layer))
+
+  ggplot() +
+  geom_sf(data = test, aes(fill = layer)) +
+    scale_fill_viridis(trans = 'log')
+plot(test)
+st_join(test, env) %>%   mutate(p2 = precipitation + layer,
+         npp_prec = 3000 * (1 - exp(-0.000664 * p2)) ) %>% plot
+         npp_temp = 3000 / (1 + exp(1.315 - 0.119 * temperature)),
+         npp2 = pmin(npp_prec, npp_temp)) %>%
+  plot
+
+
+  
+read_stars('~/Downloads/EU/SO.tif') %>% 
+  st_crop(hex_geo) %>% st_as_stars() %>%  aggregate(hex_geo, max, na.rm = TRUE) %>% plot
+```
+
+
+
+```{r}
 ggplot(mounds) +
   geom_histogram(aes(size)) + 
   scale_x_log10()
@@ -33,13 +155,14 @@ ggplot(mounds) +
 
 
 ```{r}
-radius_khabur <- 2500
+radius_khabur <- 5000
 hex <- st_bbox(mounds) %>%
     st_make_grid(cellsize = radius_khabur * sqrt(3), square = FALSE, flat_topped = TRUE) %>% # st_make_grid wants the short diagonal
     st_sf() %>%
   mutate(id = 1:n())
 
 hex_geo <- st_transform(hex, crs = 4326)
+
 ```
 
 
@@ -131,7 +254,13 @@ dat <- st_join(arable, env, join = st_equals) %>%
 ```
 
 ```{r}
-plot(dat)
+plot(arable)
+```
+```{r}
+plot(arable)
+```
+```{r}
+plot(env)
 ```
 
 ```{r}
@@ -164,7 +293,8 @@ khabur <- sfnetwork(hex %>% st_centroid, as_tibble(settlements)) %N>%
          x = st_coordinates(pts)[,1], 
          y = st_coordinates(pts)[,2],
          eq = 0) %>%
-        filter(food > 0)# fixes cell 182
+        filter(food > 0) %>% # fixes cell 182
+  as_tbl_graph()
 ```
 
 ```{r}
@@ -172,20 +302,66 @@ ggplot(st_as_sf(dat)) +
   geom_sf() +
   geom_sf(data = st_as_sf(dat)[182,], color = 'red')
 ```
-```{r}
-plot(khabur)
-```
-
 
 ```{r}
 radius <- 2.5 # radius is required in the trade code, should generalize
 
-test2 <- reduce(1:50, run_sim, beta1 = 5, beta2 = .01, .init = khabur)
+test2 <- accumulate(1:25, run_sim, beta1 = 1.5, beta2 = 5, .init = khabur)
 
-test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_fill_viridis_c()
-test2
+test2[[25]] %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population, geometry = geometry)) + scale_size_area() + scale_fill_viridis_c()
 
-run_sim(khabur)
+
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  filter(time < 10) %>%
+  ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population, geometry = geometry), alpha = .8) + scale_size_area() + scale_fill_viridis_c() + facet_wrap(~time)
+
+library(gganimate)
+
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  filter(time < 10) %>%
+  ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population, geometry = geometry), alpha = .8) + scale_size_area() + scale_fill_viridis_c() +   transition_states(time,
+                    transition_length = 2,
+                    state_length = 1)
+
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  ggplot(aes(time, population, group = id)) +
+  geom_line(alpha = .5) +
+  theme_minimal()
+
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time))  %>%
+  group_by(time) %>%
+  summarise(population = sum(population)) %>%
+  ggplot(aes(time, population)) +
+  geom_line()
+
+library(profvis)
+profvis(run_sim(khabur))
+
+test3 <- khabur %>%
+  as_tbl_graph() %>%
+  select(-geometry)
+ test4 <- khabur %>% select(-geometry)
+system.time(run_sim(khabur));system.time(run_sim(test3));system.time(run_sim(test4))
+
+library(microbenchmark)
+ microbenchmark(khabur %E>%
+    mutate(trade_utility = .N()$population[to] ^ 1.15 * exp(-if_else(distance > 0, distance, 1) / 1)) ,
+    khabur %E>%
+    mutate(trade_utility1 = .N()$population[to] ^ 1.15,
+           trade_utility2 = exp(-if_else(distance > 0, distance, 1) / 1),
+           trade_utility = trade_utility1 * trade_utility2), times = 10L
+ )
+    
+
+  prof
 migrate
 
 test2 %>%
@@ -196,6 +372,17 @@ test2 %>%
 ```
 
 ```{r}
+
+ggplot(tibble(x = 1:50), aes(x)) +
+ # geom_function(fun = ~.^-1) +
+#  geom_function(fun = ~exp(-./4), color = 'red') +
+#  geom_function(fun = ~exp(-./8), color = 'green') +
+   geom_function(fun = ~exp(-./2)*exp(-./5), color = 'green') +
+   geom_function(fun = ~exp(-./2), color = 'red') 
+
+```
+
+```{r}
 as_tibble(test2) %>% bind_cols(as_tibble(volume) %>% filter(id!=182)) %>%
   summary
 #  bind_cols(as_tibble(env)) %>%
@@ -203,28 +390,18 @@ as_tibble(test2) %>% bind_cols(as_tibble(volume) %>% filter(id!=182)) %>%
   ggplot(aes(count, population)) +
   geom_point()
 ```
+
 ```{r}
-test2 %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population)) + scale_size_area() + scale_fill_viridis_c()
-
-rivers <- read_sf('~/Downloads/KhaburModeling-1/data/Waterway_Data/rivers.shp') 
-hollowways <- read_sf('~/Downloads/KhaburModeling-1/data/AncientRoads/hollowways.shp') 
-mb_sites <- read_sf('~/Downloads/KhaburModeling-1/data/MB-sites_Jazira/MB_costmatrix.shp')
-plot(rivers)
-ggplot(mb_sites) +
-  geom_sf() +
-    geom_sf_label(data = filter(mb_sites, Size__ha_ >= 30), aes(label = Site_name))
+ggplot(hex) +
+  geom_sf(color = 'lightgrey') +
+  geom_sf(data = filter(mounds, size > 0), aes(size = size), alpha = .5) +
+  geom_sf(data = rivers, color = 'red') +
+    geom_sf(data = mb_sites, color = 'green') 
+  scale_size_area() +
+  theme_bw()
 ```
-```{r}
-plot(env)
 
-env %>%
-  mutate(river = if_else(lengths(st_intersects(geometry, rivers)) > 0, TRUE, FALSE),
-         sites) %>%
-  plot
 
-env %>% mutate(river = if_else(lengths(st_intersects(geometry, mb_sites)) > 0, TRUE, FALSE)) %>%
-  plot
-```
 
 ```{r}
 st_join(mb_sites, hex, join = st_within) %>%
@@ -238,9 +415,11 @@ st_join(mb_sites, hex, join = st_within) %>%
   
   env
 ```
+
 ```{r}
 plot(volume %>% filter(volume > 1000000))
 ```
+
 ```{r}
 ggplot() +
   geom_sf(data = env) +
