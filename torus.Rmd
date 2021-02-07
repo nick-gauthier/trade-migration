@@ -1,0 +1,301 @@
+---
+title: "scratch"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidygraph)
+library(ggraph)
+library(sf)
+library(gganimate)
+library(patchwork)
+library(furrr)
+```
+
+```{r constants}
+radius <- 5 # radius for each hinterland tile
+phi <- radius * 0.5
+pop_start <- 25 # starting population per settlement
+food_start <- 200
+```
+
+for some reason the fifth centroid from the right is shifted up?
+```{r}
+bbox <- st_bbox(c(xmin = -80, ymin = -69, xmax = 81, ymax = 69)) 
+
+hex <- bbox %>% 
+  st_make_grid(n = c(20, 20), cellsize = radius * sqrt(3), square = FALSE) %>% # st_make_grid wants the short diagonal
+  st_sf()
+
+pts <- st_bbox(c(xmin = -80, ymin = -69, xmax = 81, ymax = 69)) %>% 
+  st_make_grid(n = c(20, 20), cellsize = radius * sqrt(3), square = FALSE, what = 'centers') %>% # st_make_grid wants the short diagonal
+  st_sf() %>%
+  st_coordinates()
+
+n <- nrow(hex)
+
+unique(pts[,1]) %>% length # should be 40
+unique(pts[,2]) %>% length # should be 20
+
+plot(hex)
+plot(pts)
+```
+so this gives us 159,600 edges without the round
+
+```{r}
+# use the set diag function from https://github.com/Aariq/holodeck/blob/master/R/utils.R
+set_diag <- function(x, value){
+  diag(x) <- value
+  return(x)
+}
+```
+
+```{r}
+xdim <- 20
+ydim <- 20
+#adapted from unit.distances() in the korhonen package
+tor_dist <- function(pts, xdim, ydim, toroidal = TRUE, topo = 'hexagonal') {
+    if (!toroidal) {
+        if (gtopo == "hexagonal") {
+            return(as.matrix(stats::dist(pts)))
+        }
+        else {
+            return(as.matrix(stats::dist(pts, method = "maximum")))
+        }
+    }
+    np <- nrow(pts)
+    maxdiffx <- xdim/2
+    maxdiffy <- max(pts[, 2])/2
+    result <- matrix(0, np, np)
+    for (i in 1:(np - 1)) {
+        for (j in (i + 1):np) {
+            diffs <- abs(pts[j, ] - pts[i, ])
+            if (diffs[1] > maxdiffx) 
+                diffs[1] <- 2 * maxdiffx - diffs[1]
+            if (diffs[2] > maxdiffy) 
+                diffs[2] <- 2 * maxdiffy - diffs[2]
+            if (grid$topo == "hexagonal") {
+                result[i, j] <- sum(diffs^2)
+            }
+            else {
+                result[i, j] <- max(diffs)
+            }
+        }
+    }
+    if (topo == "hexagonal") {
+        sqrt(result + t(result))
+    }
+    else {
+        result + t(result)
+    }
+}
+unit.distances
+
+test$pts
+
+xdim/2
+max(test$pts[,2]) / 2
+```
+```{r}
+min(pts[,2])
+```
+
+
+```{r}
+settlements <- pts %>%
+    tor_dist(20, 20) %>%
+    #round(2) %>%
+  as.matrix() %>%
+  set_diag(9999) %>%
+  as_tbl_graph %>%
+  mutate(id = 1:n(),
+         population = pop_start,
+         food = food_start,
+         x = pts[,1], # this might be the wrong order
+         y = pts[,2],
+         eq = 0) %E>%
+  rename(distance = weight) %>%
+  mutate(distance = if_else(distance == 9999, 0, distance),
+         trade_flow = 0,
+         migrant_flow = 0) 
+
+paths <- settlements %E>% 
+ # mutate(distance = if_else(near(distance, (sqrt(3) * radius), sqrt(3) * radius, distance)) %>% # to fix the short wrapping distances, set everything to the desired min distance
+  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
+  igraph::as.undirected() %>%
+  as_tbl_graph()
+
+som.nn::dist.torus
+
+plot(pts[1:3])
+
+
+# it should have (400^2 - 400) /2
+```
+
+
+```{r}
+ggraph(paths) +
+  geom_edge_link(alpha = .5) +
+  geom_node_point() +
+  theme_void()
+```
+
+```{r}
+ggraph(test_paths) +
+  geom_edge_link(alpha = .5) +
+  geom_node_point() +
+  theme_void()
+```
+
+
+```{r}
+ggraph(paths, x = x, y = y) +
+  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_edge_arc(alpha = .5) +
+  geom_node_point() +
+  coord_sf(datum = NA) +
+  theme_void()
+
+paths
+```
+```{r}
+ggplot() +
+  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_sf(data = st_sf(pts)) + 
+  geom_sf(data = st_centroid(hex)) + 
+  coord_sf(datum = NA)
+```
+
+
+```{r}
+grid_som <- kohonen::somgrid(xdim = 20, ydim = 20, topo= 'hexagonal', neighbourhood.fct = 'bubble', toroidal = TRUE) # somgrid orders points from bottom left to the right, and st_coordinates does from bottom left up
+  
+settlements <- grid_som %>%
+kohonen::unit.distances() %>%
+  replace(. == 0, 999) %>% # or could use set_diag
+  as.matrix() %>%
+  as_tbl_graph %>%
+  mutate(id = 1:n(),
+         population = pop_start,
+         food = food_start,
+         x = grid_som$pts[,1] * sqrt(3) * radius + (min(pts[,1]) - (min(grid_som$pts[,1]) * sqrt(3) * radius)),
+         y = grid_som$pts[,2] * sqrt(3) * radius + (min(pts[,2]) - (min(grid_som$pts[,2]) * sqrt(3) * radius)), 
+         eq = 0) %E>%
+  rename(distance = weight) %>%
+  mutate(distance = if_else(distance == 999, 0, distance * sqrt(3) * radius),
+         trade_flow = 0,
+         migrant_flow = 0) 
+
+paths <- settlements %E>% 
+  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
+  igraph::as.undirected() %>%
+  as_tbl_graph()
+
+# check that everything has a degree of 6
+  filter(paths, centrality_degree() != 6)
+# check the total number of paths is correct 
+nrow(as_tibble(paths, 'edges')) == (n * 6 / 2)
+```
+
+wait, why is there only one diagonal . . . i think that's correct but there should be a check for a valid torus
+```{r}
+paths %>% 
+ggraph(x = x, y = y) +
+  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_edge_link(alpha = .5) +
+  scale_color_viridis_c() +
+  geom_node_point(aes(color = id)) +
+  theme_void()
+```
+
+
+
+```{r}
+pts2 <- kohonen::somgrid(xdim = 20, ydim = 20, topo= 'hexagonal', neighbourhood.fct = 'bubble', toroidal = TRUE)$pts
+pts;pts2
+plot(pts[,2], pts2[,2])
+
+plot(arrange(as_tibble(pts), X, Y)$X, arrange(as_tibble(pts2), x, y)$x)
+plot(arrange(as_tibble(pts), X, Y)$Y, arrange(as_tibble(pts2), x, y)$y)
+data.frame(x = arrange(as_tibble(pts), X, Y)$X, x2 = arrange(as_tibble(pts2), x, y)$x) %>% lm(x ~ x2, data = .)
+
+
+arrange(as_tibble(pt2), X, Y)$X
+sqrt()
+
+st_bbox(hex);bbox
+st_bbox(hex)
+
+
+#x 92.99
+#y 76.5
+
+ st_bbox(hex)$xmin ; bbox$xmin
+ st_bbox(hex)$ymin ; bbox$ymin
+  st_bbox(hex)$xmax ; bbox$xmax
+ st_bbox(hex)$ymax ; bbox$ymax
+ 
+st_bbox(st_centroid(hex))
+st_bbox(hex)
+bbox
+
+
+sqrt(3)
+
+
+min(pts[,1])
+
+min(pts[,1]) - (min(grid_som$pts[,1]) * sqrt(3) * radius)
+min(pts[,2]) - (min(grid_som$pts[,2]) * sqrt(3) * radius)
+
+```
+
+
+
+
+test_paths has only 1200 nodes, original paths has 1640
+400 * 
+
+```{r}
+test_paths
+```
+
+
+```{r}
+tst <- pts
+tst[,2] <- tst[,2] + max(pts[,2]) - min(pts[,2])
+tst[,1] <- tst[,1] + min(pts[,1])
+plot(rbind(pts, tst))
+
+min(pts[,1])
+max(pts[,2])
+```
+
+
+```{r}
+library(tyche)
+```
+
+
+```{r}
+test2 <- accumulate(1:100, run_sim, .init = mutate(settlements, populaiton = runif(n(), 1, 100)))
+
+
+test2[[100]] %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(hex)) + geom_point(aes(size = population, x = x, y = y)) + scale_size_area() 
+```
+
+```{r}
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  ggplot(aes(time, population, group = id)) +
+  geom_line(alpha = .5) +
+  scale_y_log10()+
+  theme_minimal()
+```
+
+
