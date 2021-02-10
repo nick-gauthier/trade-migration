@@ -2,12 +2,12 @@
 title: Trade, migration, and the dynamics of spatial interaction
 author:
   - name: Nicolas Gauthier
-    email: Nicolas.Gauthier@asu.edu
-    affiliation: Arizona State University
+    email: Nngauthier@arizona.edu
+    affiliation: University of Arizona
     footnote: Corresponding Author
 address:
-  - code: Arizona State University
-    address: School of Human Evolution and Social Change, S. Caddy Mall, Tempe, AZ
+  - code: University of Arizona
+    #address: School of Human Evolution and Social Change, S. Caddy Mall, Tempe, AZ
 abstract: Archaeological settlement patterns are the physical remains of complex webs of human decision-making and social interaction. Entropy-maximizing spatial interaction models are a means of building parsimonious models that average over much of this small-scale complexity, while maintaining key large-scale structural features. Dynamic social interaction models extend this approach by allowing archaeologists to explore the coevolution of human settlement systems and the networks of interaction that drive them. Yet, such models are often imprecise, relying on generalized notions of settlement "influence" and "attractiveness" rather than concrete material flows of goods and people. Here, I present a disaggregated spatial interaction model that explicitly resolves trade and migration flows and their combined influence on settlement growth and decline. I explore how the balance of costs and benefits of each type of interaction influence long-term settlement patterns. I find trade flows are the strongest determinant of equilibrium settlement structure, and that migration flows play a more transient role in balancing site hierarchies. This model illustrates how the broad toolkit for spatial interaction modeling developed in geography and economics can aid the precision of quantitative theory building in archaeology, and provides a roadmap for connecting mechanistic models to the empirical archaeological record.
 
 journal: "Journal of Archaeological Science"
@@ -41,7 +41,7 @@ Powerful alternatives to the equilibrium-seeking slow dynamic in archaeological 
 
 In order to keep them flexible, archaeological spatial interaction models are also typically abstract and highly aggregated. The flows are assumed to be some aggregate of trade and migration reflecting the "influence" of each site on another, and the settlement state variable that evolves in time is some generalized notion of "attractiveness". While these generalizations are useful for empirical work, they elide much of the processual granularity that makes these models such a useful tool for quantitative theory building. Metabolic costs, such as the energy expended producing and transporting food over space where transportation infrastructure is sparse, provide constraints on energy flows in exchange systems [@Drennan1984]. In any particular case, the balance between these costs and the metabolic benefits of social interaction influences whether resources are moved in bulk to populations in a settlement or whether those populations move themselves to the available resources. In order to determine how the balance of these flows influence long run settlement patterns, it is thus necessary to replace the generalized notion of flows of "influence" with more direct estimates of trade and migration flows and a more concrete mechanistic model for how these flows influence settlement dynamics.
 
-Here, I present a dynamic spatial interaction model that explicitly tracks the flows of trade and migration within a settlement system. I use a variant of the Lotka-Volterra equations known as a "competition for resources" model, in which a population of urban settlements competes for access to food from multiple agricultural hinterlands. The populations of these settlements grow and decline according to the flow of resources into the settlements and the flow of migrants between them. Using a disaggregated, two-part spatial interaction model, I model the flows of food to people ("trade") and the flows of people to food ("migration") separately and explore how varying the relative costs of each type of movement influences the resulting population distribution at equilibrium. I show that the constraints on moving food to people are the primary determinants of long-run settlement patterns, influencing the extractive reach of settlements and their ultimate population carrying capacity. Migration costs play a secondary role, serving to enhance or diminish exhisting settlement hierarchies depending on the specific objectives of the migrants. These findings not only lay the groundwork for more quantitative theory of spatial interaction in premodern societies, but also provide important caveats for interpreting statistical analyses of archaeological networks.
+Here, I present a dynamic spatial interaction model that explicitly tracks the flows of trade and migration within a settlement system. I use a variant of the Lotka-Volterra equations known as a "competition for resources" model, in which a population of urban settlements competes for access to food from multiple agricultural hinterlands. The populations of these settlements grow and decline according to the flow of resources into the settlements and the flow of migrants between them. Using a disaggregated, two-part spatial interaction model, I model the flows of food to people ("trade") and the flows of people to food ("migration") separately and explore how varying the relative costs of each type of movement influences the resulting population distribution at equilibrium. I show that the constraints on moving food to people are the primary determinants of long-run settlement patterns, influencing the extractive reach of settlements and their ultimate population carrying capacity. Migration costs play a secondary role, serving to enhance or diminish existing settlement hierarchies depending on the specific objectives of the migrants. These findings not only lay the groundwork for more quantitative theory of spatial interaction in premodern societies, but also provide important caveats for interpreting statistical analyses of archaeological networks.
 
 # Methods
 
@@ -278,7 +278,7 @@ run_sim <- function(net, alpha1 = 1.15, alpha2 = 1, beta1 = 5, beta2 = 10, nu = 
 # By default, this and the following chunk are not run to save time, and instead
 # results are precomputed and loaded in as separate data files. To run these chunks,
 # set eval = TRUE.
-plan(multisession)
+plan(multisession, workers = 4)
 
 param_sweep <- expand_grid(beta1 = c(5, 10, 15, 20),
                            beta2 = c(5, 10, 15, 20),
