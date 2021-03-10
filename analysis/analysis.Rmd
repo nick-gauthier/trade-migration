@@ -373,42 +373,34 @@ A settlement's ability to gain an initial surplus because of its position is key
 # Note: this figure might display oddly when knit under the elsarticle template because of its strict image sizing.
 # the correctly size image is saved to a file instead
 a <- node_dat %>%
-  filter(alpha1 == 1.15, alpha2 == 0, m_max == 0.05, beta2 == 20) %>%
+  filter(alpha1 == 1.15, alpha2 == 0, beta2 == 20) %>%
   group_by(beta1, beta2)%>%
   arrange(population) %>%
   filter(population >= 1) %>%
   ungroup %>%
   mutate(beta1 = as.factor(beta1),
-         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) %>%
-  ggplot() +
-  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
-  geom_point(aes(x, y, size = population, color = population))+
-  scale_size_area(name = 'Population') +
-  scale_color_viridis_c(guide = 'legend', name = 'Population') +
-  coord_sf(datum = NA) +
-  theme_void() +
-  facet_wrap(~beta1, nrow = 1, labeller = 'label_parsed')
+         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .)))
 
-b <- nd_graphs %>%
-  filter(alpha1 == 1.15, alpha2 == 0, m_max == .05, beta2 == 20)  %>%
+nd_graphs %>%
+  filter(alpha1 == 1.15, alpha2 == 0, beta2 == 20)  %>%
   mutate(nd = map(trade, as_tibble, 'edges')) %>%
-  select(beta1:m_max, nd) %>%
+  select(beta1:nu, nd) %>%
   unnest(col = c(nd)) %>%
   tbl_graph(nodes = as_tibble(paths, 'nodes'), edges = .) %E>%
-  arrange(trade_flow) %>%
-    mutate(beta1 = as.factor(beta1),
+  arrange(-trade_flow) %>%
+  mutate(beta1 = as.factor(beta1),
          beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) %>%
   ggraph(x = x, y = y) +
-    geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_edge_link(aes(color = trade_flow), width = 1) +
   scale_edge_color_viridis(name = 'Trade flow') +
-  facet_edges(~beta1, nrow = 1, labeller = 'label_parsed') +
+  geom_point(data = a, aes(x=x, y=y, size = population)) +
+  scale_size_area(name = 'Population') +
+  facet_edges(~beta1, labeller = 'label_parsed') +
   coord_sf(datum = NA) +
   theme_void()
 
-a / b + plot_annotation(tag_levels = 'A')
-
-ggsave('beta1.png', height = 6, width = 9)
+#ggsave('beta1.png', height = 6, width = 9)
 ```
 
 ```{r beta2, fig.cap='Settlement population (A) and trade flows (B) at equilibrium for different levels of $\\beta_2$$, the distance deterrence for migration, with $\\beta_1 = 5, \\alpha_1 = 1.15, \\alpha_2 = 0$.', warning = FALSE}
