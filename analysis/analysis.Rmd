@@ -300,6 +300,7 @@ param_sweep <- expand_grid(beta1 = c(5, 10, 15, 20),
 saveRDS(param_sweep, 'derived_data/param_sweep')
 ```
 
+
 ```{r, eval = FALSE}
 nystuen_dacey <- function(net, mode = 'trade'){
   net %E>%
@@ -314,31 +315,32 @@ nystuen_dacey <- function(net, mode = 'trade'){
 nd_graphs <- param_sweep %>%
   mutate(trade = map(sim, nystuen_dacey),
          migrants = map(sim, nystuen_dacey, mode = 'migrants')) %>%
-  select(beta1:m_max, trade, migrants)
+  select(-sim)
 
 param_dat <- param_sweep %>%
-   mutate(nodes = map(sim, as_tibble, 'nodes')) %>%
-  mutate(population = map_dbl(nodes, ~sum(.$population)),
+  mutate(nodes = map(sim, as_tibble, 'nodes'),
+         population = map_dbl(nodes, ~sum(.$population)),
          prob_vect = map2(nodes, population, ~ (.x$population) / .y),
          entropy = map_dbl(prob_vect, ~ -sum(. * log(.)) / log(300)),
          count = map_dbl(nodes, ~sum(.$population > 1))) %>%
-  select(beta1:m_max, population, entropy, count)
+  select(-sim, -nodes, -prob_vect)
 
 node_dat <- param_sweep %>%
   mutate(nodes = map(sim, as_tibble, 'nodes')) %>%
-  select(beta1:m_max, nodes) %>%
+  select(-sim) %>%
   unnest(col = c(nodes)) %>%
-  select(beta1:m_max, population, x, y, harvest, immigrants)
+  select(-food, -migrant_production, -id)
 
 edge_dat <- param_sweep %>%
   mutate(edges = map(sim, ~activate(., 'edges') %>% filter(trade_flow > 1 | migrant_flow > 1) %>% as_tibble)) %>%
-  select(beta1:m_max, edges)
+  select(-sim)
 
 saveRDS(nd_graphs, 'derived-data/nd_graphs')
 saveRDS(param_dat, 'derived-data/param_dat')
 saveRDS(node_dat, 'derived-data/node_dat')
 saveRDS(edge_dat, 'derived-data/edge_dat')
 ```
+
 
 # Analysis
 
@@ -411,40 +413,34 @@ nd_graphs %>%
 # Note: this figure might display oddly when knit under the elsarticle template because of its strict image sizing.
 # the correctly size image is saved to a file instead
 a <- node_dat %>%
-   filter(alpha2 == 0, m_max == 0.05, beta1 == 5, alpha1 == 1.15) %>%
+   filter(alpha2 == 0, beta1 == 5, alpha1 == 1.15) %>%
   group_by(alpha1, beta2)%>%
   arrange(population) %>%
+    filter(population >= 1) %>%
   ungroup %>%
   mutate(beta2 = as.factor(beta2),
-         beta2 = fct_relabel(beta2, ~paste('beta[2] == ', .))) %>%
-   ggplot(aes(x, y)) +
-  geom_point(aes(size = population, color = population))+
-  scale_size_area(name = 'Population') +
-  scale_color_viridis_c(guide = 'legend', name = 'Population') +
-  coord_equal() +
-  theme_void() +
-  facet_grid(alpha1~beta2,  labeller = 'label_parsed')
+         beta2 = fct_relabel(beta2, ~paste('beta[2] == ', .)))
 
-b <- nd_graphs %>%
-  filter(alpha1 == 1.15, alpha2 == 0, m_max == .05, beta1 == 5)  %>%
+nd_graphs %>%
+  filter(alpha1 == 1.15, alpha2 == 0, beta1 == 5) %>%
   mutate(nd = map(trade, as_tibble, 'edges')) %>%
-  select(beta1:m_max, nd) %>%
+  select(beta1:nu, nd) %>%
   unnest(col = c(nd)) %>%
   tbl_graph(nodes = as_tibble(paths, 'nodes'), edges = .) %E>%
-  arrange(trade_flow) %>%
+  arrange(-trade_flow) %>%
     mutate(beta2 = as.factor(beta2),
          beta2 = fct_relabel(beta2, ~paste('beta[2] == ', .))) %>%
   ggraph(x = x, y = y) +
-    geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_edge_link(aes(color = trade_flow), width = 1.1) +
   scale_edge_color_viridis(name = 'Trade flow') +
-  facet_edges(~beta2, nrow = 1,  labeller = 'label_parsed') +
+    geom_point(data = a, aes(x=x, y=y, size = population)) +
+  scale_size_area(name = 'Population') +
+  facet_edges(~beta2, labeller = 'label_parsed') +
   coord_sf(datum = NA) +
   theme_void()
 
-a / b + plot_annotation(tag_levels = 'A')
-
-ggsave('beta2.png', height = 6, width = 9)
+#ggsave('beta2.png', height = 6, width = 9)
 ```
 
 
@@ -456,19 +452,20 @@ In the first scenario with only population-based migration, there are nonlinear 
 
 ```{r beta2alpha1, fig.cap='Interaction between the distance deterrence for migrants ($\\beta_2$, columns) and the returns to attractiveness for population size ($\\alpha_1$, rows), when the moving food to settlements is difficult and migrants make decisions based only on settlement population size ($\\beta_1 = 5$ and $\\alpha_2 = 0$).'}
 node_dat %>%
-    filter(beta1 == 5, alpha2 == 0, m_max == 0.05) %>%
+    filter(beta1 == 5, alpha2 == 0) %>%
   group_by(alpha1, beta2)%>%
+  filter(population >= 1) %>%
   arrange(population) %>%
   ungroup %>%
       mutate(beta2 = as.factor(beta2),
          beta2 = fct_relabel(beta2, ~paste('beta[2] == ', .)),
          alpha1 = as.factor(alpha1),
          alpha1 = fct_relabel(alpha1, ~paste('alpha[1] == ', .))) %>%
-  ggplot(aes(x, y)) +
-  geom_point(aes(size = population, color = population))+
+  ggplot() +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
+  geom_point(aes(x, y, size = population))+
   scale_size_area(name = 'Population') +
-  scale_color_viridis_c(guide = 'legend', name = 'Population') +
-  coord_equal() +
+  coord_sf(datum = NA) +
   theme_void() +
   facet_grid(rows = vars(alpha1), cols = vars(beta2), labeller = 'label_parsed')
 
@@ -477,23 +474,24 @@ ggsave('beta2alpha1.png', width = 8, height = 8)
 
 Allowing $\alpha_2 \geq 1$, so that people avoid settlements with low welfare, considerably increases the complexity of the system when trade costs are high (Figure \@ref(fig:beta2alpha2)). If migrants are attracted to zones with high per capita welfare, migration acts to smooth over variations in settlement size due to differential access to resources. The uniform central zone of low population centers discussed earlier arises at even shorter distance migration. This reflects situations where movement is generally easy, but there are few advantages to living in more populated sites so migration acts as a counterbalance to the competition for resources.
 
-```{r beta2alpha2, fig.cap='Interaction between the distance deterrence for migrants ($\\beta_2$, columns) and the returns to attractiveness for per capita welfare ($\\alpha_2$, rows), when the moving food to settlements is difficult and migrants make decisions based on both settlement population size and per capita welfare ($\\beta_1 = 5$ and $\\alpha_1 = 1.15$).'}
+```{r beta2alpha2, fig.cap='Interaction between the distance deterrence for migrants ($\\beta_2$, columns) and the returns to attractiveness for per capita welfare ($\\alpha_2$, rows), when moving food to settlements is difficult and migrants make decisions based on both settlement population size and per capita welfare ($\\beta_1 = 5$ and $\\alpha_1 = 1.15$).'}
 node_dat %>%
-    filter(beta1 == 5, alpha1 == 1.15, m_max == 0.05) %>%
+    filter(beta1 == 5, alpha1 == 1.15) %>%
   group_by(beta2, alpha2)%>%
+  filter(population >= 1) %>%
   arrange(population) %>%
     ungroup %>%
       mutate(beta2 = as.factor(beta2),
          beta2 = fct_relabel(beta2, ~paste('beta[2] == ', .)),
          alpha2 = as.factor(alpha2),
          alpha2 = fct_relabel(alpha2, ~paste('alpha[2] == ', .))) %>%
-  ggplot(aes(x, y)) +
-  geom_point(aes(size = population, color = population))+
+  ggplot() +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
+  geom_point(aes(x, y, size = population))+
   scale_size_area(name = 'Population') +
-  scale_color_viridis_c(guide = 'legend', name = 'Population') +
-  coord_equal() +
+  coord_sf(datum = NA) +
   theme_void() +
-  facet_grid(rows = vars(alpha2), cols = vars(beta2),  labeller = 'label_parsed')
+  facet_grid(rows = vars(alpha2), cols = vars(beta2), labeller = 'label_parsed')
 
 ggsave('beta2alpha2.png', width = 8, height = 8)
 ```
