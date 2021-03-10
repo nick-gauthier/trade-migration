@@ -2,7 +2,7 @@
 title: Trade, migration, and the dynamics of spatial interaction
 author:
   - name: Nicolas Gauthier
-    email: Nngauthier@arizona.edu
+    email: ngauthier@arizona.edu
     affiliation: University of Arizona
     footnote: Corresponding Author
 address:
@@ -111,13 +111,18 @@ food_start <- 200
 ```
 
 ```{r settlement_setup}
-hinterlands <- c(40, -69, -40, -69, -80, 0, 
+hex <- c(40, -69, -40, -69, -80, 0, 
                  -40, 70, 40, 69, 80, 0, 40, -69) %>% # changing one 69 in the top corner to a 70 helps for some reason
   matrix(nrow = 7, byrow = 2) %>%
   list %>%
-  st_polygon %>%
+  st_polygon() %>%
+  st_sfc() %>%
+  st_sf()
+
+hinterlands <- hex %>%
   st_make_grid(cellsize = radius * sqrt(3), square = FALSE) %>% # st_make_grid wants the short diagonal
-  st_sf
+  st_sf() %>%
+  .[hex,]
 
 n <- nrow(hinterlands)
 
