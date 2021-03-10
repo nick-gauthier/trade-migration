@@ -263,9 +263,10 @@ migrate <- function(net, alpha1, alpha2, beta, nu = .05){
 In summary, the flow of resources from each hinterland to each settlement is determined by Equation \@ref(eq:trade), which depends on the underlying distribution of resources and settlement populations. Then, the flow of migrants between settlements is determined by Equation \@ref(eq:migration), based on the settlement populations and the flow of resources. Finally, the populations of the settlements grow both by consuming trade resources and by accepting new migrants according to Equation \@ref(eq:growth), and this new population distribution will feed back to influence future trade and migrant flows. The entire system is complicated web of nonlinear interaction, as the growth and decline of settlements can potentially depend on all other settlements. The complexity of this system increases geometrically as the number of settlements increases, precluding exact analytic solutions. We must instead leverage numerical simulations to capture these complex interactions computationally.
 
 ```{r}
-run_sim <- function(net, alpha1 = 1.15, alpha2 = 1, beta1 = 5, beta2 = 10, nu = .05){
-  #new_net <- 
-    net %>%
+run_sim <- function(net, alpha1 = 1.15, alpha2 = 0, beta1 = 5, beta2 = 10, nu = .05){
+  n_nodes <- igraph::gorder(net)
+  
+  new_net <- net %>%
     trade(alpha = alpha1, beta = beta1) %>%
     migrate(alpha1 = alpha1, alpha2 = alpha2, beta = beta2, nu = nu) %>%
     grow %>%
@@ -273,9 +274,10 @@ run_sim <- function(net, alpha1 = 1.15, alpha2 = 1, beta1 = 5, beta2 = 10, nu = 
     select(-c(trade_utility, migrant_utility)) %>%
     activate('nodes')
 
-  # if(sum(pull(new_net, eq) >= 100) < n){
-  #   return(new_net)
-   #} else return(done(new_net))
+    # stop the simulation if all hexes have been at equilbirium for more than 50 years
+   if(sum(pull(new_net, eq) >= 50) < n_nodes){ 
+     return(new_net)
+   } else return(done(new_net))
 }
 ```
 
@@ -288,12 +290,14 @@ plan(multisession, workers = 4)
 param_sweep <- expand_grid(beta1 = c(5, 10, 15, 20),
                            beta2 = c(5, 10, 15, 20),
                           alpha1 = c(1, 1.05, 1.1, 1.15),
-                          alpha2 = c(0, 1, 1.05, 1.1, 1.15),
-                          nu = c(.05, .5, 1)) %>%
-  filter(beta1 <= beta2) %>%
-  mutate(sim = future_pmap(list(beta1, beta2, alpha1, alpha2, nu), function(a,b,c,d,e) reduce(1:2000, ~run_sim(., beta1 = a, beta2 = b, alpha1 = c, alpha2 = d, nu = e), .init = settlements), .progress = TRUE))
+                          alpha2 = c(0, 1, 1.05, 1.1, 1.15)) %>%
+ # filter(beta1 <= beta2) %>%
+  mutate(sim = future_pmap(list(beta1, beta2, alpha1, alpha2), 
+                           function(a,b,c,d) reduce(1:2000, ~run_sim(., beta1 = a, beta2 = b, alpha1 = c, alpha2 = d, nu = 0.05), 
+                  .init = settlements), 
+                  .progress = TRUE))
 
-saveRDS(param_sweep, 'param_sweep')
+saveRDS(param_sweep, 'derived_data/param_sweep')
 ```
 
 ```{r, eval = FALSE}

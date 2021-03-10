@@ -1,0 +1,183 @@
+---
+title: "sweeps"
+author: "Nick Gauthier"
+date: "3/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(mgcv)
+library(gratia)
+library(tidyverse)
+```
+
+
+
+```{r}
+param_sweep <- readRDS('analysis/derived-data/param_sweep')
+param_sweep2 <- readRDS('analysis/derived-data/param_sweep2')
+
+param_sweep;param_sweep2
+param_sweep$nu %>% unique
+```
+
+```{r}
+param_dat <- readRDS('analysis/derived-data/param_dat2')
+```
+
+
+```{r}
+  gam(population ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4),
+          data = param_dat) %>% draw(scales = "fixed")
+  gam(population ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4),
+          data = filter(param_dat, alpha2 > 0)) %>% draw(scales = "fixed")
+
+  
+gam(entropy ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4),
+          data = param_dat)  %>% draw(scales = "fixed")
+gam(entropy ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4),
+          data = filter(param_dat, alpha2 > 0))  %>% draw(scales = "fixed")
+
+
+gam(count ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4), family = poisson(), data = param_dat) %>% draw(scales = "fixed")
+
+gam(count ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4), family = poisson(), data = filter(param_dat, alpha2 > 0)) %>% draw(scales = "fixed")
+```
+
+
+```{r}
+gam(entropy ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4) +
+      ti(beta1, beta2, k = 4) + ti(beta1, alpha1, k = 4) + ti(beta1, alpha1, k = 4) + ti(beta2, alpha1, k = 4) + ti(beta2, alpha2, k = 4) + ti(alpha1, alpha2, k = 4),
+          data = filter(param_dat, alpha2 > 0))  %>% draw(scales = "fixed")
+
+t1 <- filter(param_dat, alpha2 > 0)
+m1 <- gam(entropy ~ s(beta1, k = 4) + s(beta2, k = 4) + s(alpha1, k = 4) + s(alpha2, k = 4) +
+      ti(beta1, beta2, k = 4) + ti(beta1, alpha1, k = 4) + ti(beta1, alpha1, k = 4) + ti(beta2, alpha1, k = 4) + ti(beta2, alpha2, k = 4) + ti(alpha1, alpha2, k = 4),
+          data =  t1, na.action = "na.fail")
+
+library(MuMIn)
+d1 <- dredge(m1)
+summary(get.models(d1, 1)[[1]])
+get.models(d1, 1)[[1]] %>% draw(scales = "fixed")
+```
+
+
+```{r}
+t2 <- accumulate(1:500, run_sim, .init = settlements)
+```
+```{r}
+test <- accumulate(1:2000, ~run_sim(., beta1 = 10, beta2 = 10, alpha1 = 1, alpha2 = 0, nu = 0.05), .init = settlements)
+
+test2 <- accumulate(1:2000, ~run_sim(., beta1 = 5, beta2 = 10, alpha1 = 1.15, alpha2 = 0, nu = 0.05), .init = settlements)
+
+test %>%
+  map_dfr(as_tibble, 'nodes', .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  ggplot(aes(time, population, group = id)) +
+  geom_line(alpha = .3) +
+  theme_minimal()
+
+test2 %>%
+  map_dfr(as_tibble, 'nodes', .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  ggplot(aes(time, population, group = id)) +
+  geom_line(alpha = .3) +
+  theme_minimal()
+```
+
+
+
+```{r}
+plan(sequential)
+plan(multisession, workers = 3)
+param_sweep2 <- expand_grid(beta1 = c(5, 10, 20),
+                             beta2 = c(20)) %>% 
+ # filter(beta1 <= beta2) %>%
+  mutate(sim = future_map2(beta1, beta2, 
+                           function(a,b) reduce(1:2000, ~run_sim(., beta1 = a, beta2 = b, alpha1 = 1, alpha2 = 0, nu = 0.05), .init = greece), 
+                  .progress = TRUE))
+
+nd_graphs2 <- param_sweep2 %>%
+  mutate(trade = map(sim, nystuen_dacey),
+         migrants = map(sim, nystuen_dacey, mode = 'migrants')) %>%
+  select(beta1:beta2, trade, migrants)
+
+param_dat2 <- param_sweep2 %>%
+   mutate(nodes = map(sim, as_tibble, 'nodes')) %>%
+  mutate(population = map_dbl(nodes, ~sum(.$population)),
+         prob_vect = map2(nodes, population, ~ (.x$population) / .y),
+         entropy = map_dbl(prob_vect, ~ -sum(. * log(.)) / log(300)),
+         count = map_dbl(nodes, ~sum(.$population > 1))) %>%
+  select(beta1:beta2, population, entropy, count)
+
+node_dat2 <- param_sweep2 %>%
+  mutate(nodes = map(sim, as_tibble, 'nodes')) %>%
+  select(beta1:beta2, nodes) %>%
+  unnest(col = c(nodes)) %>%
+  select(beta1:beta2, population, x, y, harvest, immigrants)
+
+edge_dat2 <- param_sweep2 %>%
+  mutate(edges = map(sim, ~activate(., 'edges') %>% filter(trade_flow > 1 | migrant_flow > 1) %>% as_tibble)) %>%
+  select(beta1:beta2, edges)
+
+a <- node_dat2 %>%
+  group_by(beta1, beta2)%>%
+  arrange(population) %>%
+  filter(population >= 1) %>%
+  ungroup %>%
+  mutate(beta1 = as.factor(beta1),
+         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) %>%
+  ggplot() +
+  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_point(aes(x, y, size = population, color = population))+
+  scale_size_area(name = 'Population') +
+  scale_color_viridis_c(guide = 'legend', name = 'Population') +
+  coord_sf(datum = NA) +
+  theme_void() +
+  facet_wrap(~beta1, nrow = 1, labeller = 'label_parsed')
+
+b <- nd_graphs2 %>%
+  mutate(nd = map(trade, as_tibble, 'edges')) %>%
+  select(beta1:beta2, nd) %>%
+  unnest(col = c(nd)) %>%
+  tbl_graph(nodes = as_tibble(khabur, 'nodes'), edges = .) %E>%
+  arrange(trade_flow) %>%
+    mutate(beta1 = as.factor(beta1),
+         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) %>%
+  ggraph(x = x, y = y) +
+    geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_edge_link(aes(color = trade_flow), width = 1) +
+  scale_edge_color_viridis(name = 'Trade flow') +
+  facet_edges(~beta1, nrow = 1, labeller = 'label_parsed') +
+  coord_sf(datum = NA) +
+  theme_void()
+
+a <- node_dat2 %>%
+  group_by(beta1, beta2)%>%
+  arrange(population) %>%
+  filter(population >= 1) %>%
+  ungroup %>%
+  mutate(beta1 = as.factor(beta1),
+         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) 
+
+nd_graphs2 %>%
+  mutate(nd = map(trade, as_tibble, 'edges')) %>%
+  select(beta1:beta2, nd) %>%
+  unnest(col = c(nd)) %>%
+  tbl_graph(nodes = as_tibble(greece, 'nodes'), edges = .) %E>%
+  arrange(trade_flow) %>%
+    mutate(beta1 = as.factor(beta1),
+         beta1 = fct_relabel(beta1, ~paste('beta[1] == ', .))) %>%
+  ggraph(x = x, y = y) +
+    geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_edge_link(aes(color = trade_flow), width = 1) +
+  geom_point(data = a, aes(x=x, y=y, size = population)) +
+  scale_edge_color_viridis(name = 'Trade flow') +
+  facet_edges(beta2~beta1, labeller = 'label_parsed') +
+  coord_sf(datum = NA) +
+  theme_void()
+
+a / b + plot_annotation(tag_levels = 'A')
+
+```
