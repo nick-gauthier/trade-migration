@@ -3,83 +3,91 @@ title: "poleis"
 output: html_document
 ---
 
+Script to generate environmental inputs for the Greek poleis case study.
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
 library(stars)
 library(tidygraph)
-library(tyche)
-
 ```
+
 
 ```{r}
 poleis <- read_tsv('~/Downloads/868961/RW109figsharev2/RW109b_verticesbasic4.txt') %>%
-  st_as_sf(coords = c('Longitude_E', 'Latitude_N'), crs = 4326)
-
-plot(poleis)
+  st_as_sf(coords = c('Longitude_E', 'Latitude_N'), crs = 4326) %>%
+  st_transform(32634)
 ```
 
 ```{r}
-radius<- 0.02
+radius <- 2500
 hex <- st_bbox(poleis) %>%
-    st_make_grid(cellsize = radius * sqrt(3), square = FALSE, flat_topped = FALSE) %>% # st_make_grid wants the short diagonal
+    st_make_grid(cellsize = radius * sqrt(3), 
+                 square = FALSE, 
+                 flat_topped = FALSE) %>% # st_make_grid wants the short diagonal
     st_sf() %>%
   mutate(id = 1:n())
 
+hex_geo <- st_transform(hex, 4326)
 plot(hex)
-
 ```
 
+```{r}
+site_count <- st_join(poleis, hex, join = st_within) %>%
+  as_tibble() %>%
+  group_by(id) %>%
+  summarize(count = n()) %>%
+  left_join(hex, ., by = 'id') %>%
+  replace_na(list(count = 0))
+
+plot(site_count)
+```
+
+
+
 ```{r, message = FALSE}
-#say 300 kg/year wheat requirement, aka 0.3 metric tons per person per year
 npp <- read_stars(c('../urban-persistence/CHELSA_bio10_01.tif', 
                     '../urban-persistence/CHELSA_bio10_12.tif')) %>% 
   setNames(c('temperature', 'precipitation')) %>%
   mutate(temperature = temperature / 10, # temperature is in degrees C * 10
          ### the miami model
-         npp_prec = 3000 * (1 - exp(-0.000664 * precipitation)),
-         npp_temp = 3000 / (1 + exp(1.315 - 0.119 * temperature)),
-         npp = pmin(npp_prec, npp_temp)) %>% # grams of dry matter / square meter / year
-  select(precipitation, npp) %>%
-  st_crop(st_bbox(hex))
-
-elev <- read_stars('~/Downloads/EarthEnv-DEM90_N35E020/EarthEnv-DEM90_N35E020.bil') %>%
-  st_crop(hex)
-  
- land_mask <- aggregate(elev>=1, hex, mean, na.rm = TRUE) %>% # instead of mean aggregating, could sum if careful about spatial units (if chelsa is 1km, then multiply by 1e6 to go from /m2 to /km2)
-  st_as_sf() %>%# temporary solution 
-   rename(land_mask = EarthEnv.DEM90_N35E020.bil)
-plot(land_mask)
+         npp_prec = 3 * (1 - exp(-0.000664 * precipitation)),
+         npp_temp = 3 / (1 + exp(1.315 - 0.119 * temperature)),
+         npp = pmin(npp_prec, npp_temp)) %>% # kilograms of dry matter / square meter / year
+  select(temperature, precipitation, npp) %>%
+  st_crop(st_bbox(hex_geo)) %>%
+  aggregate(hex_geo, mean, na.rm = TRUE) %>% 
+  st_transform(hex) %>%
+  st_as_sf()
 ```
 
+
 ```{r, message = FALSE}
-env <- aggregate(npp, hex, mean, na.rm = TRUE) %>% # instead of mean aggregating, could sum if careful about spatial units (if chelsa is 1km, then multiply by 1e6 to go from /m2 to /km2)
-  st_as_sf()
+elev <- read_stars('~/Downloads/EarthEnv-DEM90_N35E020/EarthEnv-DEM90_N35E020.bil') %>%
+  st_crop(hex_geo)
+
+land_mask <- aggregate(elev >= 1, hex_geo, mean, na.rm = TRUE) %>% 
+  st_as_sf() %>%
+  st_transform(st_crs(hex)) %>%
+  rename(land_mask = EarthEnv.DEM90_N35E020.bil)
 
 arable <- elev %>%
   as('Raster') %>%
   raster::terrain(unit = 'degrees') %>%
   st_as_stars() %>%
-  aggregate(hex, FUN = function(x) sum(x <= 2.5, na.rm = TRUE) / length(x)) %>%
+  aggregate(hex_geo, FUN = function(x) sum(x <= 2.5, na.rm = TRUE) / length(x)) %>%
+  st_transform(hex) %>% 
   st_as_sf() %>%
   st_join(land_mask, join = st_equals) %>%
   mutate(arable = as.numeric(slope * st_area(.) * land_mask))
-
-dat <- st_join(arable, env, join = st_equals) %>% 
-  mutate(food = npp / 1000 * 0.25 * arable / 300 / 2) %>% # divide by 1000 to get kg/m2, .25 to get aboveground biomass and grain. now edible grain in kg/m2, multiply times arable land to get total kg per cell, divide by 300 to get people it can support . . . easy! and * 0.50 for biennial fallow too 
-  select(food) %>%
-   filter(!is.na(food))
-
-### double check, the order of operations here is actually important
-
-plot(dat)
 ```
 
-
-```{r}
-plot(arable)
+multiply by to .25 to get aboveground biomass and grain. now edible grain in kg/m2, multiply times arable land to get total kg per cell, divide by 300 to get people it can support and * 0.50 for biennial fallow too. this is the free food from the agricultural population, so multiply by 0.1 as the "tax" that's actually available to move around
+```{r, message = FALSE}
+env <- st_join(arable, npp, join = st_equals) %>% 
+  mutate(food = npp * 0.25 * arable / 300 / 2 * 0.1)
 ```
+
 
 ```{r}
 plot(env)
@@ -87,54 +95,37 @@ plot(env)
 
 
 ```{r}
-plot(pts)
-pts <- st_as_sf(dat) %>% st_centroid()
+pts <- env %>%
+  filter(!is.na(food)) %>% 
+  st_centroid()
 
+plot(pts)
+```
+
+```{r}
 settlements <- pts %>%
   st_distance() %>%
   units::set_units('km') %>%
   units::drop_units() %>% 
   replace(. == 0, 99999) %>%
-  as_tbl_graph %>%
+  as_tbl_graph() %>%
   mutate(id = 1:n(),
+         population = 5,
+         food = pts$food,
+         eq = 0,
          x = st_coordinates(pts)[,1], 
          y = st_coordinates(pts)[,2]) %E>%
   rename(distance = weight) %>%
-  mutate(distance = if_else(distance == 99999, 0, distance),
+  # set self ties to half the cell radius, in km
+  mutate(distance = if_else(distance == 99999, radius/2000, distance),
          trade_flow = 0,
          migrant_flow = 0)
 ```
 
-```{r}
-library(sfnetworks)
-greece <- sfnetwork(dat %>% st_centroid, as_tibble(settlements)) %N>%
-    mutate(id = 1:n(),
-           # this starts it off at local carrying capacity
-           population = dat$food,
-         food = dat$food,
-         x = st_coordinates(pts)[,1], 
-         y = st_coordinates(pts)[,2]) %>%
-  as_tbl_graph()
-```
 
 ```{r}
-ggplot(st_as_sf(as_tibble(greece))) +
-  geom_sf(aes(fill= food, size = food)) +
-  scale_size_area()
+saveRDS(settlements, 'greece_settlements')
+saveRDS(env, 'greece_env')
 ```
 
-`
-```{r}
-radius <- 5 # radius is required in the trade code, should generalize
-
-test2 <- accumulate(1:100, run_sim, beta1 = 1.5, beta2 = 8, .init = greece)
-
-test2[[100]] %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(dat), aes(fill = food)) + geom_sf(aes(size = population, geometry = geometry)) + scale_size_area() + scale_fill_viridis_c()
-
-test2[[64]] %>% filter(id == 398) 
-grow
-
-test2[[62]] %>% trade(1.15, 5) %>% migrate(1.15, 1, 5)%>% filter(id == 398) %N>% mutate(population_new = population + population *  pmin(.0001 * (harvest - population), 0.02) - migrant_production +  immigrants) %>% as_tibble() 
-test2[[63]] %>% trade(1.15, 5) %>% migrate(1.15, 1, 5)%>% filter(id == 398) %N>% mutate(population_new = population + population *  pmin(.0001 * (harvest - population), 0.02) - migrant_production +  immigrants) %>% as_tibble() 
-```
 
