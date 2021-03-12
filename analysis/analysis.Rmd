@@ -105,7 +105,6 @@ Rather than a single settlement-hinterland system, the model represents a networ
 
 ```{r constants}
 radius <- 5 # radius for each hinterland tile
-phi <- radius * 0.5
 pop_start <- 25 # starting population per settlement
 food_start <- 200
 ```
@@ -134,7 +133,7 @@ settlements <- hinterlands %>%
   st_centroid %>%
   st_distance %>%
   round(2) %>%
-  replace(. == 0, 999) %>%
+  replace(. == 0, 9999) %>%
   as_tbl_graph %>%
   mutate(id = 1:n(),
          population = pop_start,
@@ -143,7 +142,7 @@ settlements <- hinterlands %>%
          y = pts[,2],
          eq = 0) %E>%
   rename(distance = weight) %>%
-  mutate(distance = if_else(distance == 999, 0, distance),
+  mutate(distance = if_else(distance == 9999, radius * 0.5, distance),
          trade_flow = 0,
          migrant_flow = 0) 
 
@@ -230,9 +229,9 @@ The spatial interaction model for trade is a simple "gravity" model, in which se
 where $X_i$ is the amount of surplus resource produced in hinterland -- the "production" term that is "constrained" in the model -- and $c_{ij}$ is the cost of moving from $i$ to $j$ (distance in kilometers). The terms in the fraction simply assess the relative costs and benefits, with the numerator representing the utility of moving food to settlement $i$ and the denominator the sum of the utilities for all potential destination locations, together ensuring that the total outflows equal the total resources in $X_i$.
 
 ```{r}
-trade <- function(net, alpha, beta, phi = radius / 2){
+trade <- function(net, alpha, beta){
   net %E>%
-   mutate(trade_utility = .N()$population[to] ^ alpha * exp(-if_else(distance > 0, distance, phi) / beta))  %N>%
+   mutate(trade_utility = .N()$population[to] ^ alpha * exp(-distance / beta))  %N>%
     mutate(trade_balance = centrality_degree(weights = trade_utility, mode = 'out', loops = TRUE),
            trade_production = food) %E>%
     mutate(trade_flow = .N()$trade_production[from] * trade_utility / .N()$trade_balance[from]) %N>% 
