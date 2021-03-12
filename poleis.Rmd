@@ -133,4 +133,47 @@ saveRDS(settlements, 'greece_settlements')
 saveRDS(food, 'greece_env')
 ```
 
+```{r}
+polis_sim <- accumulate(1:1000,
+                   ~run_sim(., beta1 = 3, beta2 = 6, alpha1 = 1.05, alpha2 = 0, nu = 0.05), 
+                   .init = prune(settlements, 6)) 
+```
+
+```{r}
+library(gghighlight)
+
+site_names <- st_join(poleis, hex, join = st_within) %>%
+  as_tibble() %>%
+  select(id, Name)
+
+polis_sim %>%
+  map_dfr(as_tibble, 'nodes', .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  left_join(site_names) %>%
+  ggplot(aes(time, population)) +
+  geom_line(aes(group = id)) +
+    gghighlight(Name %in% c('Athens','Thebes', 'Argos', 'Korinth'),
+                label_key = Name,
+                unhighlighted_params = list(alpha = 0.3)) +
+  theme_bw() +
+  labs(x = 'Years', y = 'Population')
+```
+
+```{r}
+rm(polis_sim);gc()
+polis_sim_cc <- accumulate(1:1000,
+                   ~run_sim(., beta1 = 3, beta2 = 6, alpha1 = 1.05, alpha2 = 0, nu = 0.05), 
+                   .init = prune(settlements, 6) %N>% mutate(population = food)) 
+```
+
+
+
+```{r}
+
+
+polis_sim[[800]] %N>%
+  as_tibble %>%
+  filter(population > 1) %>%
+  pull(population)  %>% hist
+```
 
