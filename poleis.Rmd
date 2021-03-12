@@ -29,7 +29,6 @@ hex <- st_bbox(poleis) %>%
   mutate(id = 1:n())
 
 hex_geo <- st_transform(hex, 4326)
-plot(hex)
 ```
 
 ```{r}
@@ -75,28 +74,35 @@ arable <- elev %>%
   as('Raster') %>%
   raster::terrain(unit = 'degrees') %>%
   st_as_stars() %>%
-  aggregate(hex_geo, FUN = function(x) sum(x <= 2.5, na.rm = TRUE) / length(x)) %>%
+  aggregate(hex_geo, FUN = function(x) sum(x <= 5, na.rm = TRUE) / length(x)) %>%
   st_transform(hex) %>% 
   st_as_sf() %>%
   st_join(land_mask, join = st_equals) %>%
-  mutate(arable = as.numeric(slope * st_area(.) * land_mask))
+  mutate(arable = as.numeric(slope * st_area(.) * land_mask),
+         # mask out cells with less than half land (~8km2)
+         arable = if_else(land_mask >= 0.5, arable, NA_real_))
 ```
 
 multiply by to .25 to get aboveground biomass and grain. now edible grain in kg/m2, multiply times arable land to get total kg per cell, divide by 300 to get people it can support and * 0.50 for biennial fallow too. this is the free food from the agricultural population, so multiply by 0.1 as the "tax" that's actually available to move around
 ```{r, message = FALSE}
-env <- st_join(arable, npp, join = st_equals) %>% 
-  mutate(food = npp * 0.25 * arable / 300 / 2 * 0.1)
-```
+env <- st_join(arable, npp, join = st_equals) 
 
+food <- transmute(env, carrying_capacity = npp * 0.25 * arable / 300 / 2 * 0.1)
+```
 
 ```{r}
 plot(env)
 ```
 
+```{r}
+plot(food)
+```
+
 
 ```{r}
-pts <- env %>%
-  filter(!is.na(food)) %>% 
+pts <- food %>%
+  mutate(id = 1:n()) %>%
+  filter(!is.na(carrying_capacity)) %>% 
   st_centroid()
 
 plot(pts)
@@ -109,9 +115,9 @@ settlements <- pts %>%
   units::drop_units() %>% 
   replace(. == 0, 99999) %>%
   as_tbl_graph() %>%
-  mutate(id = 1:n(),
-         population = 5,
-         food = pts$food,
+  mutate(id = pts$id,
+         population = 15,
+         food = pts$carrying_capacity,
          eq = 0,
          x = st_coordinates(pts)[,1], 
          y = st_coordinates(pts)[,2]) %E>%
@@ -122,10 +128,9 @@ settlements <- pts %>%
          migrant_flow = 0)
 ```
 
-
 ```{r}
 saveRDS(settlements, 'greece_settlements')
-saveRDS(env, 'greece_env')
+saveRDS(food, 'greece_env')
 ```
 
 
