@@ -145,25 +145,26 @@ settlements <- hinterlands %>%
   mutate(distance = if_else(distance == 9999, radius * 0.5, distance),
          trade_flow = 0,
          migrant_flow = 0) 
+```
+
+```{r}
+# The larger your domain grows the more potential connections there will be, which can
+# increase computational costs significantly. We can fix this by filtering out edges defined
+# at a certain threshold. If we're using the exponential beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. So at a maximum parameterization of beta = 20, truncating the network at this distance serves to eliminate flows that will be less than .5% or 1 food.
 
 prune <- function(net, beta, tolerance = 0.001){
   net %E>%
     filter(distance < -log(tolerance) * beta)
 }
-  
-# The larger your domain grows the more potential connections there will be, which can
-# increase computational costs significantly. We can fix this by filtering out edges defined
-# at a certain threshold. If we're using the exponential beta parameterization, we can truncate using the following command, where the term in the log is the minimum distance effect we want to capture. We'll set it to .005, which if we assume food is 200 gives us 1. So at a maximum parameterization of beta = 20, truncating the network at this distance serves to eliminate flows that will be less than .5% or 1 food.
-
-paths <- settlements %E>% 
-  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
-  igraph::as.undirected() %>%
-  as_tbl_graph()
 ```
 
 
 ```{r spatial-domain, fig.cap="Spatial domain for the simulation experiments. The hinterlands are 300 evenly-sized hexagons with radius 5km arranged in a continuous tiling with a total size of approximately 19,500 km2. Settlements are arranged in a triangular lattice located at the centroids of each hexagonal tile, and are connected by a system of physical paths joining each settlement to its six nearest neighbors.", message = FALSE}
-ggraph(paths, x = x, y = y) +
+settlements %E>% 
+  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
+  igraph::as.undirected() %>%
+  as_tbl_graph() %>%
+ggraph(x = x, y = y) +
   geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_edge_link(alpha = .5) +
   geom_node_point() +
@@ -274,7 +275,7 @@ run_sim <- function(net, alpha1 = 1.15, alpha2 = 0, beta1 = 5, beta2 = 10, nu = 
     activate('nodes')
 
     # stop the simulation if all hexes have been at equilbirium for more than 50 years
-   if(sum(pull(new_net, eq) >= 50) < n_nodes){ 
+   if(sum(pull(new_net, eq) >= 100) < n_nodes){ 
      return(new_net)
    } else return(done(new_net))
 }
@@ -305,8 +306,8 @@ nystuen_dacey <- function(net, mode = 'trade'){
   net %E>%
   group_by(from) %>%
   {if (mode == 'trade') filter(., trade_flow == max(trade_flow)) else filter(., migrant_flow == max(migrant_flow))} %>%
-  ungroup %>%
-  filter(.N()$population[from] < .N()$population[to]) %N>%
+  ungroup() %>%
+  filter(trade_flow > .N()$harvest[from]) %N>%
   mutate(terminal = node_is_sink()) %>%
   convert(to_undirected) 
 }
@@ -321,7 +322,9 @@ param_dat <- param_sweep %>%
          population = map_dbl(nodes, ~sum(.$population)),
          prob_vect = map2(nodes, population, ~ (.x$population) / .y),
          entropy = map_dbl(prob_vect, ~ -sum(. * log(.)) / log(300)),
-         count = map_dbl(nodes, ~sum(.$population > 1))) %>%
+         count = map_dbl(nodes, ~sum(.$population > 1)),
+         terminals_trade = map_dbl(sim, ~sum(nystuen_dacey(.)$terminal)),
+         terminals_mig = map_dbl(sim, ~sum(nystuen_dacey(., mode = 'migrants')$terminal))) %>%
   select(-sim, -nodes, -prob_vect)
 
 node_dat <- param_sweep %>%
