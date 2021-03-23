@@ -10,6 +10,9 @@ library(tidyverse)
 library(sf)
 library(stars)
 library(tidygraph)
+library(ggrepel)
+
+library(gghighlight)
 ```
 
 
@@ -64,7 +67,36 @@ npp <- read_stars(c('../urban-persistence/CHELSA_bio10_01.tif',
 ```{r, message = FALSE}
 elev <- read_stars('~/Downloads/EarthEnv-DEM90_N35E020/EarthEnv-DEM90_N35E020.bil') %>%
   st_crop(hex_geo)
+```
 
+```{r}
+lake <- read_stars('~/kopais_105.tif') %>% 
+  transmute(test = if_else(is.na( kopais_105.tif), NA_real_,1 )) %>% 
+  st_as_sf(merge = TRUE)
+
+elev2 <- (elev * ifelse(is.na(st_crop(elev, lake, crop = FALSE)[[1]]), 1, 0))
+
+land_mask2 <- 
+  aggregate(elev2 >= 1, hex_geo, mean, na.rm = TRUE) %>% 
+  st_as_sf() %>%
+  st_transform(st_crs(hex)) %>%
+  rename(land_mask = EarthEnv.DEM90_N35E020.bil)
+
+lake2 <- read_stars('~/kopais_95.tif') %>% 
+  transmute(test = if_else(is.na( kopais_95.tif), NA_real_,1 )) %>% 
+  st_as_sf(merge = TRUE)
+
+elev3 <- (elev * ifelse(is.na(st_crop(elev, lake2, crop = FALSE)[[1]]), 1, 0))
+
+land_mask3 <- aggregate(elev3 >= 1, hex_geo, mean, na.rm = TRUE) %>% 
+  st_as_sf() %>%
+  st_transform(st_crs(hex)) %>%
+  rename(land_mask = EarthEnv.DEM90_N35E020.bil)
+
+plot(land_mask);plot(land_mask2);plot(land_mask3)
+```
+
+```{rmessage = FALSE}
 land_mask <- aggregate(elev >= 1, hex_geo, mean, na.rm = TRUE) %>% 
   st_as_sf() %>%
   st_transform(st_crs(hex)) %>%
@@ -133,19 +165,94 @@ saveRDS(settlements, 'greece_settlements')
 saveRDS(food, 'greece_env')
 ```
 
+
 ```{r}
-polis_sim <- accumulate(1:1000,
-                   ~run_sim(., beta1 = 3, beta2 = 6, alpha1 = 1.05, alpha2 = 0, nu = 0.05), 
-                   .init = prune(settlements, 6)) 
+settlements <- readRDS('greece_settlements')
+food <- readRDS('greece_env')
+```
+
+get the lake free dem
+```{r}
+new_food <-  st_join(land_mask, food, join = st_equals) %>% mutate(new_car = carrying_capacity * land_mask) %>% select(new_car) %>% st_drop_geometry() %>% remove_missing()
+```
+
+
+select top ten cells, are how many of the city list are in there? -- that's the metric?
+
+```{r}
+target <- filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth'))
 ```
 
 ```{r}
-library(gghighlight)
+calibrate <- function(x) {
+  set.seed(x[1]) # necessary for multiocre ABC
+  
+  reduce(1:2000, ~run_sim(., beta1 = x[2], beta2 = x[3], alpha1 = x[4], alpha2 = x[5], nu = 0.05), 
+                   .init = prune(settlements, max(x[2], x[3])))%>%
+ as_tibble('nodes') %>%
+  filter(population >= 1) %>%
+ arrange(-population) %>%
+  slice_head(n = 10) %>%
+  st_as_sf(coords = c('x', 'y'), crs = 32634) %>%
+  st_filter(target, .predicate = st_is_within_distance, dist = 5000) %>%
+  nrow()
+}
 
-site_names <- st_join(poleis, hex, join = st_within) %>%
+prior <- list(c('unif', 1, 20), c('unif', 1, 20), c('unif', 0.9, 1.2), c('unif', 0, 1.2))
+prior.test = 'X1 <= X2'
+
+abc_test <- EasyABC::ABC_rejection(calibrate, prior, 20, prior_test = 'X1 <= X2', summary_stat_target = 4, tol = 0.2, use_seed = TRUE, progress_bar = TRUE)
+
+abc_test_seq <- EasyABC::ABC_sequential('Beaumont', calibrate, prior, 20, prior_test = 'X1 <= X2', summary_stat_target = 4, tolerance_tab = c(2, 1, .5), use_seed = TRUE, verbose = TRUE, progress_bar = TRUE)
+```
+
+```{r}
+abc_test
+```
+
+```{r}
+polis_sim <- accumulate(1:1000,
+                   ~run_sim(., beta1 = 4, beta2 = 8, alpha1 = 1.1, alpha2 = 1, nu = 0.05), 
+                   .init = prune(settlements, 8))
+```
+
+```{r}
+read_csv('~/Downloads/points.csv')
+```
+```{r}
+inv <- read_csv('~/Downloads/points.csv') %>%
+  st_as_sf(coords = c('lon', 'lat'), crs = 4326) %>% 
+  st_transform(32634) %>%
+  st_crop(st_bbox(food))
+
+ggplot(select(inv, Size)) + geom_sf(aes(size = Size, color = Size)) + geom_label_repel(data = filter(inv, Size >= 4), aes(geometry = geometry, label = name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps = 100) + scale_color_viridis_c() + scale_size_area()
+```
+
+
+```{r}
+library(patchwork)
+
+target <-poleis %>%
+  filter(Name %in% c('Athens','Thebes', 'Argos', 'Korinth'))
+site_names <- st_join(target, mutate(food, id = 1:n()), join = st_is_within_distance, dist = 8000) %>%
   as_tibble() %>%
   select(id, Name)
 
+
+
+top10 <-   as_tibble(polis_sim[[1000]], 'nodes') %>%
+    filter(population >= 1) %>%
+  #  arrange(-population) %>% 
+   #slice_head(n = 10) %>%
+    st_as_sf(coords = c('x', 'y'), crs = 32634) %>%
+    st_join(poleis, ., join = st_is_within_distance, dist = 6000, left = FALSE)
+
+get_results(polis_sim[[1000]])
+polis_sim[[1000]]
+site_names()
+```
+
+```{r}
 polis_sim %>%
   map_dfr(as_tibble, 'nodes', .id = 'time') %>%
   mutate(time = as.numeric(time)) %>%
@@ -154,18 +261,272 @@ polis_sim %>%
   geom_line(aes(group = id)) +
     gghighlight(Name %in% c('Athens','Thebes', 'Argos', 'Korinth'),
                 label_key = Name,
+                unhighlighted_params = list(alpha = 0.3), label_params = list(max.overlaps = 1000)) +
+  theme_bw() +
+  labs(x = 'Years', y = 'Population') 
+
+polis_sim[[1000]] %>%
+  filter(population >= 1) %>%
+  ggraph(x = x, y = y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  #geom_edge_link(aes(color = migrant_flow)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area(name = 'Population') +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+  
+    geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), color = 'red') +
+ # geom_label_repel(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)+
+ # geom_sf(data = top10, color = 'orange') +
+   # geom_label_repel(data = top10, aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps = 20) +
+  geom_sf(data = select(inv, Size), aes(size = Size), color = 'white') + geom_label_repel(data = filter(inv, Size >= 3), aes(geometry = geometry, label = name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps = 100) + scale_color_viridis_c() +
+  geom_sf(data = tibble(x=  690339 , y =4261700) %>% st_as_sf(coords = c('x','y'), crs =32634), color = 'purple', size = 2) +
+  geom_sf(data = mycenaean %>% filter(Name != 'Thorikos: Hab'), color = 'red', aes(size = as.numeric(SizM)))
+```
+```{r}
+mycenaean <- read_csv('analysis/mycenaean_atlas.csv') %>%
+  mutate(Lat = as.numeric(Lat)) %>%
+  remove_missing() %>%
+  st_as_sf(coords = c('Lon', 'Lat'), crs = 4326) %>%
+  st_transform(32634) %>%
+  st_crop(st_bbox(food))# %>%
+  ggplot() +
+  geom_sf(aes(size = as.numeric(SizM)) )
+  
+  arrange(mycenaean, -as.numeric(SizM))
+```
+
+
+what do I want to do here . . . get the top ten sites on the dynamics?
+```{r}
+a <- polis_sim %>%
+  map_dfr(as_tibble, 'nodes', .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  left_join(site_names) %>%
+  ggplot(aes(time, population)) +
+  geom_line(aes(group = id)) +
+    gghighlight(Name %in% c('Athens','Thebes', 'Argos', 'Korinth'),
+                label_key = Name,
+                unhighlighted_params = list(alpha = 0.3), label_params = list(max.overlaps = 1000)) +
+  theme_bw() +
+  labs(x = 'Years', y = 'Population')
+
+b <- polis_sim[[932]] %>%
+  filter(population >= 1) %>%
+  ggraph(x = x, y = y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  #geom_edge_link(aes(color = migrant_flow)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area(name = 'Population') +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+  
+ #   geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth' , 'Kromna')), color = 'red') +
+  geom_sf(data = target, color = 'orange') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth', 'Merenda', 'Kromna')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)
+```
+
+
+```{r, fig.height=3.5, fig.width= 3.5}
+b / a  + plot_layout(heights = c(2, 1))
+```
+```{r}
+polis_sim[[350]] %>%
+  filter(population >= 1) %>%
+  ggraph(x = x, y = y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area(name = 'Population') +
+  geom_node_point(aes(size = population)) +
+    geom_sf(data = poleis, color = 'red') +
+
+  theme_void() +
+    geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth' )), color = 'red') +
+  geom_sf(data = target, color = 'orange') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Potniai', 'Eutresis', 'Kabirion', 'Plataia', 'Thespiai', 'Thebes')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps =20)
+
+
+polis_sim[[1000]] %>%
+  filter(population >= 1) %>%
+  ggraph(x = x, y = y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area(name = 'Population') +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+    geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), color = 'red') +
+  geom_sf(data = target, color = 'orange') +
+    geom_label_repel(data = filter(poleis, Name %in% c('Potniai', 'Eutresis', 'Kabirion', 'Plataia', 'Thespiai', 'Thebes')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps =20)
+```
+```{r}
+
+final_sites <-  as_tibble(polis_sim[[1000]], 'nodes') %>%
+    filter(population >= 1) %>%
+   # arrange(-population) %>% 
+   #slice_head(n = 10) %>%
+    st_as_sf(coords = c('x', 'y'), crs = 32634) 
+polis_sim[[1000]] %>%
+  filter(population >= 1) %>%
+  ggraph(x = x, y = y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area(name = 'Population') +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+   # geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), color = 'red') +
+  geom_sf(data = st_filter(poleis, final_sites, .predicate = st_is_within_distance, dist = 4000), color = 'orange') +
+    geom_label_repel(data = st_filter(poleis, final_sites, .predicate = st_is_within_distance, dist = 4000), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1, max.overlaps =20)
+
+```
+
+
+```{r}
+st_filter(poleis, filter(poleis, Name == 'Thebes'), .predicate = st_is_within_distance, dist = 10000)
+```
+
+
+
+```{r}
+#nd plots
+polis_sim[[1000]] %>%
+  nystuen_dacey() %>%
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area() +
+  geom_edge_link(aes(alpha = trade_flow)) +
+  scale_edge_alpha() +
+  geom_node_point(aes(size = population)) +
+  theme_void()
+
+
+polis_sim %>%
+  nystuen_dacey(mode = 'migrants') %>%
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area() +
+  geom_edge_link(aes(alpha = migrant_flow)) +
+  scale_edge_alpha() +
+  geom_node_point(aes(size = population)) +
+  theme_void()
+
+```
+
+
+```{r}
+
+clust <-    polis_sim %E>%
+  group_by(from) %>%
+  filter(., trade_flow == max(trade_flow)) %N>%
+  mutate(clust = group_components()) %>% pull(clust)
+
+
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area() +
+ # geom_edge_link() +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+    geom_sf(data = poleis, color = 'red') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)
+  
+  food %>% remove_missing() %>%
+    mutate(clust = clust) %>%
+  ggplot() +
+  geom_sf(aes(fill = clust)) +
+    scale_fill_viridis_c()
+
+```
+
+```{r}
+polis_sim %E>% 
+  group_by(from) %>%
+  mutate(max_out = max(trade_flow)) %>%
+  mutate(test = centrality_degree(weights = trade_flow, mode = 'in')>)
+
+polis_sim %E>%
+  group_by(from) %>%
+  filter(trade_flow == max(trade_flow)) %>%
+  ungroup %>%
+  filter(trade_flow > .N()$harvest[from]) %N>%
+  mutate(terminal = node_is_sink())
+```
+
+
+```{r}
+
+
+
+polis_sim %>%
+  filter(population >= 1) %>%
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white', name = 'Local carrying capacity') +
+  scale_size_area() +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+    geom_sf(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth', 'Khalkis')), color = 'red') +
+  #geom_sf(data = inv, color = 'orange') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth', 'Khalkis')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)
+```
+
+
+```{r}
+rm(polis_sim);gc()
+polis_sim_cc <- accumulate(1:1000,
+                   ~run_sim(., beta1 = 4, beta2 = 8, alpha1 = 1.1, alpha2 = 1, nu = 0.05),                    .init = prune(settlements, 8) %N>% mutate(population = c(rep(1, 510), 200, rep(1,181)))) 
+
+                  # .init = prune(settlements, 8) %N>% mutate(population = food)) 
+```
+
+```{r}
+polis_sim_cc %>%
+  map_dfr(as_tibble, 'nodes', .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  left_join(site_names) %>%
+  ggplot(aes(time, population)) +
+  geom_line(aes(group = id)) +
+    gghighlight(Name %in% c('Athens','Thebes', 'Argos', 'Korinth', 'Khalkis'),
+                label_key = Name,
                 unhighlighted_params = list(alpha = 0.3)) +
   theme_bw() +
   labs(x = 'Years', y = 'Population')
 ```
 
 ```{r}
-rm(polis_sim);gc()
-polis_sim_cc <- accumulate(1:1000,
-                   ~run_sim(., beta1 = 3, beta2 = 6, alpha1 = 1.05, alpha2 = 0, nu = 0.05), 
-                   .init = prune(settlements, 6) %N>% mutate(population = food)) 
+polis_sim_cc[[1000]] %>%
+  filter(population >= 1) %>%
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white') +
+  scale_size_area() +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+    geom_sf(data = poleis, color = 'red') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Athens','Thebes', 'Argos', 'Korinth')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)
+```
+```{r}
+polis_sim_cc[[250]] %>%
+  filter(population >= 1) %>%
+  ggraph(x =x, y =y) +
+  geom_sf(data = food, aes(fill = carrying_capacity)) +
+  scale_fill_viridis_c(na.value = 'white') +
+  scale_size_area() +
+  geom_node_point(aes(size = population)) +
+  theme_void() +
+    geom_sf(data = poleis, color = 'red') +
+  geom_label_repel(data = filter(poleis, Name %in% c('Orchomenos', 'Khalkis','Tiryns','Glisas','Kopai','Athens','Koropi','Tenea', 'Kromna','Thebes', 'Prof.Elias', 'Argos', 'Korinth')), aes(geometry = geometry, label = Name), stat = 'sf_coordinates',  box.padding = 1)
 ```
 
+```{r}
+polis_sim_cc[[1000]] %N>%
+  as_tibble %>%
+  left_join(site_names) %>%
+  select(Name, population) %>%
+  arrange(-population)
+```
 
 
 ```{r}
@@ -175,5 +536,32 @@ polis_sim[[800]] %N>%
   as_tibble %>%
   filter(population > 1) %>%
   pull(population)  %>% hist
+```
+
+
+
+```{r}
+
+
+test <- list.files('~/Downloads/rstudio-export-2', full.names = TRUE)[-1] %>%
+  map_dfr(~readRDS(.) %>% mutate(test = map_dbl(sim, get_results)) %>%
+  select(-sim))
+
+test %>%
+  filter(test >= 4) %>%
+  select(-test) %>%
+  pivot_longer(everything()) %>%
+  ggplot(aes(value)) +
+  geom_density() +
+  #geom_histogram() +
+  facet_wrap(~name, scales = 'free')
+test %>%
+  filter(test == 4) %>%
+  select(-test) %>%
+  pivot_longer(everything()) %>%
+  ggplot(aes(value)) +
+  geom_density() +
+  #geom_histogram() +
+  facet_wrap(~name, scales = 'free')
 ```
 

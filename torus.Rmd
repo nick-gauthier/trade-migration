@@ -26,7 +26,7 @@ for some reason the fifth centroid from the right is shifted up?
 ```{r}
 bbox <- st_bbox(c(xmin = -80, ymin = -69, xmax = 81, ymax = 69)) 
 
-hex <- bbox %>% 
+hinterlands <- bbox %>% 
   st_make_grid(n = c(20, 20), cellsize = radius * sqrt(3), square = FALSE) %>% # st_make_grid wants the short diagonal
   st_sf()
 
@@ -35,12 +35,12 @@ pts <- st_bbox(c(xmin = -80, ymin = -69, xmax = 81, ymax = 69)) %>%
   st_sf() %>%
   st_coordinates()
 
-n <- nrow(hex)
+n <- nrow(hinterlands)
 
 unique(pts[,1]) %>% length # should be 40
 unique(pts[,2]) %>% length # should be 20
 
-plot(hex)
+plot(hinterlands)
 plot(pts)
 ```
 so this gives us 159,600 edges without the round
@@ -77,7 +77,7 @@ tor_dist <- function(pts, xdim, ydim, toroidal = TRUE, topo = 'hexagonal') {
                 diffs[1] <- 2 * maxdiffx - diffs[1]
             if (diffs[2] > maxdiffy) 
                 diffs[2] <- 2 * maxdiffy - diffs[2]
-            if (grid$topo == "hexagonal") {
+            if (topo == "hexagonal") {
                 result[i, j] <- sum(diffs^2)
             }
             else {
@@ -92,6 +92,7 @@ tor_dist <- function(pts, xdim, ydim, toroidal = TRUE, topo = 'hexagonal') {
         result + t(result)
     }
 }
+
 unit.distances
 
 test$pts
@@ -154,7 +155,7 @@ ggraph(test_paths) +
 
 ```{r}
 ggraph(paths, x = x, y = y) +
-  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_edge_arc(alpha = .5) +
   geom_node_point() +
   coord_sf(datum = NA) +
@@ -164,13 +165,13 @@ paths
 ```
 ```{r}
 ggplot() +
-  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_sf(data = st_sf(pts)) + 
-  geom_sf(data = st_centroid(hex)) + 
+  geom_sf(data = st_centroid(hinterlands)) + 
   coord_sf(datum = NA)
 ```
 
-
+**This is the working implementation**
 ```{r}
 grid_som <- kohonen::somgrid(xdim = 20, ydim = 20, topo= 'hexagonal', neighbourhood.fct = 'bubble', toroidal = TRUE) # somgrid orders points from bottom left to the right, and st_coordinates does from bottom left up
   
@@ -178,6 +179,7 @@ settlements <- grid_som %>%
 kohonen::unit.distances() %>%
   replace(. == 0, 999) %>% # or could use set_diag
   as.matrix() %>%
+  round(2) %>%
   as_tbl_graph %>%
   mutate(id = 1:n(),
          population = pop_start,
@@ -201,11 +203,48 @@ paths <- settlements %E>%
 nrow(as_tibble(paths, 'edges')) == (n * 6 / 2)
 ```
 
+this does as above but without a torus
+```{r}
+grid_som2 <- kohonen::somgrid(xdim = 20, ydim = 20, topo= 'hexagonal', neighbourhood.fct = 'bubble', toroidal = FALSE) # somgrid orders points from bottom left to the right, and st_coordinates does from bottom left up
+
+settlements2 <- grid_som2 %>%
+kohonen::unit.distances() %>%
+  replace(. == 0, 999) %>% # or could use set_diag
+  as.matrix() %>%
+  round(2) %>%
+  as_tbl_graph %>%
+  mutate(id = 1:n(),
+         population = pop_start,
+         food = food_start,
+         x = grid_som2$pts[,1] * sqrt(3) * radius + (min(pts[,1]) - (min(grid_som2$pts[,1]) * sqrt(3) * radius)),
+         y = grid_som2$pts[,2] * sqrt(3) * radius + (min(pts[,2]) - (min(grid_som2$pts[,2]) * sqrt(3) * radius)), 
+         eq = 0) %E>%
+  rename(distance = weight) %>%
+  mutate(distance = if_else(distance == 999, 0, distance * sqrt(3) * radius),
+         trade_flow = 0,
+         migrant_flow = 0) 
+
+paths2 <- settlements2 %E>% 
+  filter(near(distance, sqrt(3) * radius, tol = .1)) %>%
+  igraph::as.undirected() %>%
+  as_tbl_graph()
+```
+
+
 wait, why is there only one diagonal . . . i think that's correct but there should be a check for a valid torus
 ```{r}
 paths %>% 
 ggraph(x = x, y = y) +
-  geom_sf(data = hex, fill = NA, color = 'grey65') +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
+  geom_edge_link(alpha = .5) +
+  scale_color_viridis_c() +
+  geom_node_point(aes(color = id)) +
+  theme_void()
+
+
+paths2 %>% 
+ggraph(x = x, y = y) +
+  geom_sf(data = hinterlands, fill = NA, color = 'grey65') +
   geom_edge_link(alpha = .5) +
   scale_color_viridis_c() +
   geom_node_point(aes(color = id)) +
@@ -227,20 +266,20 @@ data.frame(x = arrange(as_tibble(pts), X, Y)$X, x2 = arrange(as_tibble(pts2), x,
 arrange(as_tibble(pt2), X, Y)$X
 sqrt()
 
-st_bbox(hex);bbox
-st_bbox(hex)
+st_bbox(hinterlands);bbox
+st_bbox(hinterlands)
 
 
 #x 92.99
 #y 76.5
 
- st_bbox(hex)$xmin ; bbox$xmin
- st_bbox(hex)$ymin ; bbox$ymin
-  st_bbox(hex)$xmax ; bbox$xmax
- st_bbox(hex)$ymax ; bbox$ymax
+ st_bbox(hinterlands)$xmin ; bbox$xmin
+ st_bbox(hinterlands)$ymin ; bbox$ymin
+  st_bbox(hinterlands)$xmax ; bbox$xmax
+ st_bbox(hinterlands)$ymax ; bbox$ymax
  
-st_bbox(st_centroid(hex))
-st_bbox(hex)
+st_bbox(st_centroid(hinterlands))
+st_bbox(hinterlands)
 bbox
 
 
@@ -278,24 +317,147 @@ max(pts[,2])
 
 ```{r}
 library(tyche)
+library(poleis)
+library(polis)
 ```
 
 
 ```{r}
-test2 <- accumulate(1:100, run_sim, .init = mutate(settlements, populaiton = runif(n(), 1, 100)))
+test2 <- accumulate(1:500, test_fun, beta1 = 5, beta2 = 1.5, alpha2 = 0, nu = 0, .init = settlements)# mutate(activate(settlements, 'nodes'), population = runif(n(), 1, 100)))
 
 
-test2[[100]] %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(hex)) + geom_point(aes(size = population, x = x, y = y)) + scale_size_area() 
+test2[[150]] %>% as_tibble %>% ggplot() + geom_sf(data = st_as_sf(hinterlands)) + geom_point(aes(size = population, x = x, y = y)) + scale_size_area() 
+```
+ so my problem is independent of the torus and symmetry breaking
+```{r}
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  #  filter(time < 140) %>%
+  ggplot(aes(time, population, group = id)) +
+  geom_line(alpha = .5) +
+  #scale_y_log10()+
+  theme_minimal()
+```
+```{r}
+400 * 250
 ```
 
 ```{r}
 test2 %>%
   map_dfr(as_tibble, .id = 'time') %>%
-  mutate(time = as.numeric(time)) %>%
-  ggplot(aes(time, population, group = id)) +
-  geom_line(alpha = .5) +
-  scale_y_log10()+
-  theme_minimal()
+  mutate(time = as.numeric(time))  %>%
+  group_by(time) %>%
+  summarise(population = sum(population)) %>%
+  ggplot(aes(time, population)) +
+  geom_line()
+```
+```{r}
+test2[[127]];test2[[128]]
 ```
 
+```{r}
+test2[[127]]  %E>%
+   mutate(trade_utility = .N()$population[to])  %>%
+  filter(is.na(trade_utility))
+
+test2[[125]] %N>%
+  trade(1.15, 5) %E>% 
+  #filter(is.infinite(trade_flow))
+ # mutate(migrant_production = 0) %>%
+  grow2 %E>%  filter(is.infinite(trade_flow))
+
+  trade(1.15, 5) %>%#mutate(trade_utility = .N()$population[to]) %N>%
+ filter(id == 22)
+
+test2[[125]] %>% test_fun() %>% test_fun %E>% filter(is.infinite(trade_flow))
+
+
+filter(activate(test2[[126]], 'edges'), is.infinite(trade_flow))# the trade_flow is inf
+# so why won't this error out when I apply it interacticvely but it does produce infs noninteractively?
+reduce(1:2, test_fun, beta1 = 5, beta2 = 1.5, alpha2 = 0, nu = 0, .init = test2[[125]]) %E>% filter(is.infinite(trade_flow))
+#%N>%
+    mutate(trade_balance = centrality_degree(weights = trade_utility, mode = 'out', loops = TRUE),
+           trade_production = food) %E>%
+    mutate(trade_flow = .N()$trade_production[from] * trade_utility / .N()$trade_balance[from]) %N>% 
+    mutate(harvest = centrality_degree(weights = trade_flow, mode = 'in', loops = TRUE))
+```
+
+```{r}
+
+param_sweep <- expand_grid(beta1 = c(5, 10, 15, 20),
+                           beta2 = c(5),
+                          alpha1 = c(1.15),
+                          alpha2 = c(0),
+                          nu = c(.05)) %>%
+  filter(beta1 <= beta2) %>%
+  mutate(sim = future_pmap(list(beta1, beta2, alpha1, alpha2, nu), function(a,b,c,d,e) reduce(1:2000, ~run_sim(., beta1 = a, beta2 = b, alpha1 = c, alpha2 = d, nu = e), .init = settlements), .progress = TRUE))
+```
+
+```{r}
+## rerun above experiments for the known area and see if that reproduces! and even if it does, can i reproduce the inital wierdness?
+
+param_sweep <- expand_grid(beta1 = c(5, 10, 15, 20),
+                           beta2 = c(5),
+                          alpha1 = c(1),
+                          alpha2 = c(0),
+                          nu = c(.05)) %>%
+  filter(beta1 <= beta2) %>%
+  mutate(sim = pmap(list(beta1, beta2, alpha1, alpha2, nu), function(a,b,c,d,e) accumulate(1:1000, ~run_sim(., beta1 = a, beta2 = b, alpha1 = c, alpha2 = d, nu = e), .init = settlements)))
+
+gc()
+
+param_sweep$sim[[1]] %>% nystuen_dacey() %>%  as_tibble %>% ggplot() + geom_sf(data = st_as_sf(hinterlands)) + geom_point(aes(size = population, x = x, y = y)) + scale_size_area() 
+
+
+```
+
+
+harvests are getting really small but not zero -- perhaps its going lower than machine precision and causing an error?
+```{r}
+test2 %>%
+  map_dfr(as_tibble, .id = 'time') %>%
+  mutate(time = as.numeric(time)) %>%
+  #  filter(time < 140) %>%
+  ggplot(aes(time, harvest, group = id)) +
+  geom_line(alpha = .5) +
+  #scale_y_log10()+
+  theme_minimal() +
+  geom_vline(xintercept = 126, alpha = .5, color = 'red')
+
+
+e
+```
+
+```{r}
+trade
+```
+
+
+```{r}
+test_fun <- function(net, alpha1 = 1.15, alpha2 = 1, beta1 = 5, beta2 = 10, nu = .05){
+  #new_net <- 
+    net %>%
+    trade(alpha = alpha1, beta = beta1) %>%
+    #migrate(alpha1 = alpha1, alpha2 = alpha2, beta = beta2, nu = nu) %>%
+    grow2 %>%
+    select(-c(trade_balance:trade_production, population_new)) %E>%
+    select(-c(trade_utility)) %>%
+    activate('nodes')
+
+  # if(sum(pull(new_net, eq) >= 100) < n){
+  #   return(new_net)
+   #} else return(done(new_net))
+}
+
+grow2 <- function(net, epsilon = .0001, rmax = .02){
+  net %N>%
+     mutate(population_new = population + population * pmin(epsilon * (harvest - population), rmax),
+           population_new = if_else(population_new > .0001, population_new, .0001),
+           eq = if_else(abs((population_new - population) / population) > 0.001, 0, eq + 1),
+           population = population_new)
+}
+
+migrate
+```
 
